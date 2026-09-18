@@ -28,6 +28,32 @@ Install pytest separately when running the test suite:
 pip install pytest
 ```
 
+### Install a released shiv package
+
+Each tag matching `vX.Y.Z` creates a GitHub release containing a standalone
+executable. Download the asset for the release you want, install it on your
+`PATH`, and make it executable:
+
+```bash
+VERSION="vX.Y.Z"
+mkdir -p "$HOME/.local/bin"
+curl --fail --location \
+  --output "$HOME/.local/bin/applicator" \
+  "https://github.com/nmlq/applicator/releases/download/${VERSION}/applicator-${VERSION}"
+chmod +x "$HOME/.local/bin/applicator"
+```
+
+The shiv package bootstraps its Python dependencies on first run, so after
+installing it you can invoke the CLI directly:
+
+```bash
+applicator --help
+```
+
+To publish a release, push a semantic version tag such as `v1.2.3`. Tags must
+contain exactly three numeric components; prerelease and build suffixes are not
+published by the release workflow.
+
 For the default OpenAI client configuration, set the API key in the
 environment:
 
