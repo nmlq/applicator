@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -111,6 +112,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     """
     # Passing argv explicitly keeps this entry point straightforward to test.
     args = build_parser().parse_args(argv)
+    # Logs go to stderr so stdout stays clean for any piped output.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
     args.handler(args)
 
 

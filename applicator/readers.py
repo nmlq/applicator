@@ -1,7 +1,13 @@
 import csv as csv_module
 import json
+import logging
 from pathlib import Path
 from typing import Callable
+
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
+
+logger = logging.getLogger(__name__)
 
 
 def read_json(path: Path) -> str:
@@ -63,10 +69,13 @@ def read_csv(
             writer = csv_module.DictWriter(dst, fieldnames=fieldnames)
             writer.writeheader()
 
-            for row_number, row in enumerate(reader, start=1):
-                value = row.get(input_column, "")
-                # Flush each row so completed work remains available immediately.
-                row[output_column] = transform(value or "")
-                writer.writerow(row)
-                dst.flush()
-                print(f"Processed row {row_number}", flush=True)
+            logger.info("Writing results to %s", output_csv)
+            # Route log records through tqdm so they don't garble the progress bar.
+            with logging_redirect_tqdm():
+                # No total: counting rows would mean reading the file twice.
+                for row in tqdm(reader, desc="Processing rows", unit="row"):
+                    value = row.get(input_column, "")
+                    # Flush each row so completed work remains available immediately.
+                    row[output_column] = transform(value or "")
+                    writer.writerow(row)
+                    dst.flush()

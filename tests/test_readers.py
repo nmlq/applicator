@@ -67,7 +67,10 @@ def test_read_csv_transforms_rows_and_preserves_columns(tmp_path, capsys):
         {"name": "Ada", "age": "36", "greeting": "Hello Ada"},
         {"name": "Grace", "age": "28", "greeting": "Hello Grace"},
     ]
-    assert capsys.readouterr().out == "Processed row 1\nProcessed row 2\n"
+    # Progress goes to stderr via tqdm, leaving stdout clean.
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Processing rows" in captured.err
 
 
 def test_read_csv_rejects_input_without_header(tmp_path):
