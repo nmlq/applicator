@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 from langchain_openai import ChatOpenAI
 
 from .readers import read_csv, read_json
+
+logger = logging.getLogger(__name__)
 
 
 def apply_prompt_to_csv(
@@ -26,6 +29,7 @@ def apply_prompt_to_csv(
     :param output_column: Destination column for model responses.
     """
     # Validate the prompt before creating the client or opening the output file.
+    logger.info("Loading prompt from %s", prompt_json)
     prompt_template = read_json(prompt_json)
 
     kwargs = {"model": model}
@@ -35,6 +39,7 @@ def apply_prompt_to_csv(
         kwargs["api_key"] = api_key
 
     # Optional connection settings are omitted so the client can use its defaults.
+    logger.info("Initializing model %s%s", model, f" at {base_url}" if base_url else "")
     llm = ChatOpenAI(**kwargs)
 
     def apply(value: str) -> str:
@@ -49,6 +54,7 @@ def apply_prompt_to_csv(
         # Normalize provider-specific response content into text for the CSV writer.
         return response.content if isinstance(response.content, str) else str(response.content)
 
+    logger.info("Processing column '%s' from %s", column, input_csv)
     read_csv(
         input_csv=input_csv,
         output_csv=output_csv,
@@ -56,3 +62,4 @@ def apply_prompt_to_csv(
         output_column=output_column,
         transform=apply,
     )
+    logger.info("Done. Results written to %s", output_csv)
