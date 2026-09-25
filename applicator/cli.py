@@ -118,8 +118,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
-    # httpx logs every API request at INFO; only surface its warnings and errors.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # The HTTP clients log every API request at INFO; only surface warnings and errors.
+    for name in ("httpx", "httpx2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     args.handler(args)
 
 
