@@ -1,9 +1,9 @@
-import csv as csv_module
 import json
 import logging
 from pathlib import Path
 from typing import Callable
 
+import pandas
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -47,35 +47,36 @@ def read_csv(
     :param transform: Function applied to each input value.
     :raises ValueError: If the input has no header or the column is missing.
     """
-    # DictReader preserves the input schema while allowing named-column access.
-    with input_csv.open("r", encoding="utf-8-sig", newline="") as src:
-        reader = csv_module.DictReader(src)
+    # Read only the header first so validation happens before any output exists.
+    # dtype=str and keep_default_na=False keep values exactly as written.
+    read_options = dict(encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    try:
+        header = pandas.read_csv(input_csv, nrows=0, **read_options)
+    except pandas.errors.EmptyDataError:
+        raise ValueError("Input CSV has no header.") from None
 
-        if not reader.fieldnames:
-            raise ValueError("Input CSV has no header.")
+    fieldnames = list(header.columns)
+    if input_column not in fieldnames:
+        raise ValueError(
+            f"Column '{input_column}' not found. "
+            f"Available columns: {', '.join(fieldnames)}"
+        )
 
-        if input_column not in reader.fieldnames:
-            raise ValueError(
-                f"Column '{input_column}' not found. "
-                f"Available columns: {', '.join(reader.fieldnames)}"
-            )
+    if output_column not in fieldnames:
+        fieldnames.append(output_column)
 
-        fieldnames = list(reader.fieldnames)
-        if output_column not in fieldnames:
-            fieldnames.append(output_column)
+    # Open the destination only after validating the source header.
+    with output_csv.open("w", encoding="utf-8", newline="") as dst:
+        pandas.DataFrame(columns=fieldnames).to_csv(dst, index=False)
 
-        # Open the destination only after validating the source header.
-        with output_csv.open("w", encoding="utf-8", newline="") as dst:
-            writer = csv_module.DictWriter(dst, fieldnames=fieldnames)
-            writer.writeheader()
-
-            logger.info("Writing results to %s", output_csv)
-            # Route log records through tqdm so they don't garble the progress bar.
-            with logging_redirect_tqdm():
-                # No total: counting rows would mean reading the file twice.
-                for row in tqdm(reader, desc="Processing rows", unit="row"):
-                    value = row.get(input_column, "")
-                    # Flush each row so completed work remains available immediately.
-                    row[output_column] = transform(value or "")
-                    writer.writerow(row)
-                    dst.flush()
+        logger.info("Writing results to %s", output_csv)
+        # Route log records through tqdm so they don't garble the progress bar.
+        with logging_redirect_tqdm():
+            # chunksize=1 buffers a single row at a time instead of the whole file.
+            # No total: counting rows would mean reading the file twice.
+            chunks = pandas.read_csv(input_csv, chunksize=1, **read_options)
+            for chunk_df in tqdm(chunks, desc="Processing rows", unit="row"):
+                chunk_df[output_column] = chunk_df[input_column].map(transform)
+                chunk_df.to_csv(dst, columns=fieldnames, header=False, index=False)
+                # Flush each row so completed work remains available immediately.
+                dst.flush()
