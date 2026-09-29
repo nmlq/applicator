@@ -27,6 +27,15 @@ setup(
     packages=find_packages(include=["applicator", "applicator.*"]),
     python_requires=">=3.9",
     install_requires=read_requirements(),
+    # Local models pull in torch, so they stay out of the default install.
+    extras_require={
+        "local": [
+            "langchain-huggingface",
+            "transformers",
+            "torch",
+            "accelerate",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "applicator=applicator.cli:main",

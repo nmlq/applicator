@@ -20,6 +20,52 @@ def readable_file(value: str) -> Path:
     return path
 
 
+def positive_int(value: str) -> int:
+    """Convert a CLI argument to a positive integer.
+
+    :param value: Number supplied on the command line.
+    :return: The parsed integer.
+    :raises argparse.ArgumentTypeError: If the value is not a positive integer.
+    """
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {value}") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1: {value}")
+    return number
+
+
+# Options that only apply to a local model, mapped to LocalModelConfig fields.
+LOCAL_OPTIONS = {
+    "device": "--device",
+    "dtype": "--dtype",
+    "max_new_tokens": "--max-new-tokens",
+    "temperature": "--temperature",
+    "top_p": "--top-p",
+    "top_k": "--top-k",
+    "repetition_penalty": "--repetition-penalty",
+    "trust_remote_code": "--trust-remote-code",
+}
+
+
+def validate_run_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject option combinations that mix the API and local model paths.
+
+    :param parser: Parser used to report errors.
+    :param args: Parsed ``run`` arguments.
+    """
+    # Exits through parser.error so mistakes read like any other usage error.
+    if args.local_model:
+        for dest, flag in (("base_url", "--base-url"), ("api_key", "--api-key")):
+            if getattr(args, dest) is not None:
+                parser.error(f"{flag} cannot be used with --local-model")
+    else:
+        for dest, flag in LOCAL_OPTIONS.items():
+            if getattr(args, dest) is not None:
+                parser.error(f"{flag} requires --local-model")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the command-line argument parser.
 
@@ -80,6 +126,58 @@ def build_parser() -> argparse.ArgumentParser:
         default="applicator_output",
         help="name of the generated CSV column (default: applicator_output)",
     )
+
+    # Local model options load a Hugging Face model in-process instead of calling an API.
+    local = run_parser.add_argument_group(
+        "local model",
+        "Run a Hugging Face model on this machine instead of calling an API. "
+        "Requires: pip install 'applicator[local]'",
+    )
+    local.add_argument(
+        "--local-model",
+        metavar="MODEL",
+        help="Hugging Face model id or local model directory to run in-process",
+    )
+    local.add_argument(
+        "--device",
+        help="device map: auto, cuda, cuda:N, mps or cpu (default: auto)",
+    )
+    local.add_argument(
+        "--dtype",
+        choices=["auto", "float16", "bfloat16", "float32"],
+        help="weight dtype (default: auto)",
+    )
+    local.add_argument(
+        "--max-new-tokens",
+        type=positive_int,
+        help="maximum tokens generated per row (default: 512)",
+    )
+    local.add_argument(
+        "--temperature",
+        type=float,
+        help="sampling temperature; omit or 0 for greedy decoding",
+    )
+    local.add_argument(
+        "--top-p",
+        type=float,
+        help="nucleus sampling probability (used when --temperature > 0)",
+    )
+    local.add_argument(
+        "--top-k",
+        type=positive_int,
+        help="top-k sampling cutoff (used when --temperature > 0)",
+    )
+    local.add_argument(
+        "--repetition-penalty",
+        type=float,
+        help="penalty for repeated tokens, e.g. 1.1",
+    )
+    local.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        default=None,
+        help="allow the model repository to run custom code",
+    )
     run_parser.set_defaults(handler=run)
 
     return parser
@@ -91,7 +189,17 @@ def run(args: argparse.Namespace) -> None:
     :param args: Namespace produced by :func:`build_parser`.
     """
     # Import lazily so help and parser usage do not require the LLM dependency.
-    from .core import apply_prompt_to_csv
+    from .core import LocalModelConfig, apply_prompt_to_csv
+
+    local_model = None
+    if args.local_model:
+        # Unset options fall back to the LocalModelConfig defaults.
+        options = {
+            dest: getattr(args, dest)
+            for dest in LOCAL_OPTIONS
+            if getattr(args, dest) is not None
+        }
+        local_model = LocalModelConfig(model=args.local_model, **options)
 
     apply_prompt_to_csv(
         input_csv=args.input_csv,
@@ -102,6 +210,7 @@ def run(args: argparse.Namespace) -> None:
         base_url=args.base_url,
         api_key=args.api_key,
         output_column=args.output_column,
+        local_model=local_model,
     )
 
 
@@ -111,7 +220,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     :param argv: Optional argument sequence; defaults to ``sys.argv``.
     """
     # Passing argv explicitly keeps this entry point straightforward to test.
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if getattr(args, "command", None) == "run":
+        validate_run_args(parser, args)
     # Logs go to stderr so stdout stays clean for any piped output.
     logging.basicConfig(
         level=logging.INFO,
@@ -121,6 +233,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # The HTTP clients log every API request at INFO; only surface warnings and errors.
     for name in ("httpx", "httpx2"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # transformers repeats generation-config warnings on every row; keep errors only.
+    logging.getLogger("transformers").setLevel(logging.ERROR)
     args.handler(args)
 
 
