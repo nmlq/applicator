@@ -278,3 +278,54 @@ def test_build_local_llm_explains_missing_dependencies(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"applicator\[local\]"):
         core.build_local_llm(core.LocalModelConfig(model="org/model"))
+
+
+def test_build_local_llm_quantizes_to_4bit(fake_huggingface, monkeypatch):
+    """Verify ``load_in_4bit`` passes an NF4 quantization config to the model.
+
+    :param fake_huggingface: Recorded fake Hugging Face arguments.
+    :param monkeypatch: Pytest monkeypatch fixture.
+    """
+    transformers = ModuleType("transformers")
+    transformers.BitsAndBytesConfig = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    monkeypatch.setitem(sys.modules, "bitsandbytes", ModuleType("bitsandbytes"))
+    sys.modules["torch"].float32 = "torch.float32"
+
+    core.build_local_llm(
+        core.LocalModelConfig(model="org/model", dtype="float32", load_in_4bit=True)
+    )
+
+    model_kwargs = fake_huggingface["pipeline"]["model_kwargs"]
+    assert model_kwargs["dtype"] == "float32"
+    assert model_kwargs["quantization_config"] == {
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_use_double_quant": True,
+        "bnb_4bit_compute_dtype": "torch.float32",
+    }
+
+
+def test_build_4bit_config_keeps_default_compute_dtype_for_auto(fake_huggingface, monkeypatch):
+    """Verify ``dtype=auto`` leaves the compute dtype to ``bitsandbytes``.
+
+    :param fake_huggingface: Recorded fake Hugging Face arguments.
+    :param monkeypatch: Pytest monkeypatch fixture.
+    """
+    transformers = ModuleType("transformers")
+    transformers.BitsAndBytesConfig = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    monkeypatch.setitem(sys.modules, "bitsandbytes", ModuleType("bitsandbytes"))
+
+    assert core.build_4bit_config("auto")["bnb_4bit_compute_dtype"] is None
+
+
+def test_build_4bit_config_explains_missing_bitsandbytes(monkeypatch):
+    """Verify a missing ``bitsandbytes`` produces an install hint.
+
+    :param monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setitem(sys.modules, "bitsandbytes", None)
+
+    with pytest.raises(RuntimeError, match="pip install bitsandbytes"):
+        core.build_4bit_config("float32")

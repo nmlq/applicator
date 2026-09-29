@@ -172,6 +172,7 @@ def test_run_builds_local_model_config(monkeypatch, tmp_path):
             "1.1",
             "--trust-remote-code",
             "--no-think",
+            "--load-in-4bit",
         )
     )
 
@@ -186,6 +187,7 @@ def test_run_builds_local_model_config(monkeypatch, tmp_path):
         repetition_penalty=1.1,
         trust_remote_code=True,
         no_think=True,
+        load_in_4bit=True,
     )
 
 
@@ -214,6 +216,7 @@ def test_run_uses_local_model_defaults(monkeypatch, tmp_path):
         (["--temperature", "0.5"], "--temperature requires --local-model"),
         (["--trust-remote-code"], "--trust-remote-code requires --local-model"),
         (["--no-think"], "--no-think requires --local-model"),
+        (["--load-in-4bit"], "--load-in-4bit requires --local-model"),
         (["--local-model", "m", "--max-new-tokens", "0"], "must be at least 1"),
     ],
 )

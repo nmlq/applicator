@@ -218,6 +218,7 @@ combined with `--local-model`, and `--model` is ignored.
 | `--repetition-penalty` | model default | Penalty for repeated tokens, for example `1.1` |
 | `--trust-remote-code` | off | Allow the model repository to run custom code |
 | `--no-think` | off | Disable the thinking phase of reasoning models such as Qwen3 |
+| `--load-in-4bit` | off | Quantize weights to 4-bit with `bitsandbytes`; `--dtype` sets the compute dtype |
 
 `--device auto` places the model on the best available device, but falls back
 to the CPU silently when torch cannot use the GPU. Use `--device cuda` or
@@ -238,15 +239,23 @@ The weights must fit in GPU memory. Approximate size is the parameter count
 multiplied by the bytes per weight: 4 bytes for `float32` and 2 for `float16`
 or `bfloat16`. Leave a few gigabytes free for generation.
 
-| Model | `float32` | `float16` / `bfloat16` |
-| --- | --- | --- |
-| `Qwen/Qwen3-4B` | ~16 GB | ~8 GB |
-| `Qwen/Qwen3-8B` | ~32 GB | ~16 GB |
-| `Qwen/Qwen3-14B` | ~56 GB | ~28 GB |
+| Model | `float32` | `float16` / `bfloat16` | `--load-in-4bit` |
+| --- | --- | --- | --- |
+| `Qwen/Qwen3-4B` | ~16 GB | ~8 GB | ~3–4 GB |
+| `Qwen/Qwen3-8B` | ~33 GB | ~16 GB | ~6–7 GB |
+| `Qwen/Qwen3-14B` | ~59 GB | ~30 GB | ~10–14 GB |
 
 When a model does not fit, `--device auto` moves some layers to the CPU. The
 run still completes, but slowly, and the log still reports the GPU device.
-Choose a smaller model or a smaller dtype instead.
+With `--device cuda` the run stops with `torch.OutOfMemoryError`. Choose a
+smaller model, a smaller dtype, or `--load-in-4bit`.
+
+Ollama's default model tags are already quantized to about 4 bits, so Ollama
+can fit a model that fails here at full precision. `--load-in-4bit` quantizes
+the full-precision Hugging Face weights while loading. It needs `bitsandbytes`
+(`pip install bitsandbytes`) and an NVIDIA GPU. The 4-bit sizes above are
+estimates: layers that are not quantized, such as the embeddings, stay at
+`--dtype`, so the size varies with it.
 
 ### Apple Silicon
 
@@ -350,8 +359,9 @@ watch -n1 nvidia-smi
 ```
 
 `Qwen/Qwen3-8B` with `--dtype float16` also fits (about 16 GB) but may be
-slower on this GPU. `Qwen/Qwen3-14B` does not fit in 24 GB at any of the
-supported dtypes.
+slower on this GPU. `Qwen/Qwen3-14B` does not fit in 24 GB at full precision;
+try it with `--load-in-4bit --dtype float32` (untested on the P40, and
+`bitsandbytes` support for Pascal GPUs is limited).
 
 ### Logging
 

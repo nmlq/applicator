@@ -27,6 +27,8 @@ class LocalModelConfig:
     :param trust_remote_code: Allow model repositories to run custom code.
     :param no_think: Disable the thinking phase of reasoning models such as
         Qwen3; templates without a thinking switch ignore it.
+    :param load_in_4bit: Quantize the weights to 4-bit with ``bitsandbytes``
+        while loading; ``dtype`` then sets the compute dtype.
     """
 
     model: str
@@ -39,6 +41,7 @@ class LocalModelConfig:
     repetition_penalty: Optional[float] = None
     trust_remote_code: bool = False
     no_think: bool = False
+    load_in_4bit: bool = False
 
 
 class LocalChatModel:
@@ -94,6 +97,32 @@ def build_openai_llm(
     return ChatOpenAI(**kwargs)
 
 
+def build_4bit_config(dtype: str):
+    """Build a ``bitsandbytes`` config that quantizes weights to 4-bit NF4.
+
+    :param dtype: Compute dtype name; ``auto`` keeps the ``bitsandbytes`` default.
+    :return: ``BitsAndBytesConfig`` for ``from_pretrained``.
+    :raises RuntimeError: If ``bitsandbytes`` is not installed.
+    """
+    try:
+        import bitsandbytes  # noqa: F401
+    except ImportError as error:
+        raise RuntimeError(
+            "--load-in-4bit needs bitsandbytes. Install it with: pip install bitsandbytes"
+        ) from error
+    import torch
+    from transformers import BitsAndBytesConfig
+
+    # Weights are stored in 4-bit but dequantized to this dtype for each matmul.
+    compute_dtype = None if dtype == "auto" else getattr(torch, dtype)
+    return BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=compute_dtype,
+    )
+
+
 def build_local_llm(config: LocalModelConfig):
     """Load a Hugging Face model into this process for local generation.
 
@@ -130,9 +159,15 @@ def build_local_llm(config: LocalModelConfig):
     model_kwargs = {"dtype": config.dtype}
     if config.trust_remote_code:
         model_kwargs["trust_remote_code"] = True
+    if config.load_in_4bit:
+        model_kwargs["quantization_config"] = build_4bit_config(config.dtype)
 
     logger.info(
-        "Loading local model %s (device=%s, dtype=%s)", config.model, config.device, config.dtype
+        "Loading local model %s (device=%s, dtype=%s%s)",
+        config.model,
+        config.device,
+        config.dtype,
+        ", 4-bit" if config.load_in_4bit else "",
     )
     # device_map rather than device: device only accepts CUDA indexes, not mps.
     pipeline = HuggingFacePipeline.from_model_id(

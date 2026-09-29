@@ -48,6 +48,7 @@ LOCAL_OPTIONS = {
     "repetition_penalty": "--repetition-penalty",
     "trust_remote_code": "--trust-remote-code",
     "no_think": "--no-think",
+    "load_in_4bit": "--load-in-4bit",
 }
 
 
@@ -185,6 +186,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=None,
         help="disable the thinking phase of reasoning models such as Qwen3",
+    )
+    local.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        default=None,
+        help="quantize weights to 4-bit with bitsandbytes to fit larger models; "
+        "--dtype sets the compute dtype",
     )
     run_parser.set_defaults(handler=run)
 
