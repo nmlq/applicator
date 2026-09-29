@@ -171,6 +171,7 @@ def test_run_builds_local_model_config(monkeypatch, tmp_path):
             "--repetition-penalty",
             "1.1",
             "--trust-remote-code",
+            "--no-think",
         )
     )
 
@@ -184,6 +185,7 @@ def test_run_builds_local_model_config(monkeypatch, tmp_path):
         top_k=40,
         repetition_penalty=1.1,
         trust_remote_code=True,
+        no_think=True,
     )
 
 
@@ -211,6 +213,7 @@ def test_run_uses_local_model_defaults(monkeypatch, tmp_path):
         (["--local-model", "m", "--api-key", "k"], "--api-key cannot be used with --local-model"),
         (["--temperature", "0.5"], "--temperature requires --local-model"),
         (["--trust-remote-code"], "--trust-remote-code requires --local-model"),
+        (["--no-think"], "--no-think requires --local-model"),
         (["--local-model", "m", "--max-new-tokens", "0"], "must be at least 1"),
     ],
 )

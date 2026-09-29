@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -46,6 +47,7 @@ LOCAL_OPTIONS = {
     "top_k": "--top-k",
     "repetition_penalty": "--repetition-penalty",
     "trust_remote_code": "--trust-remote-code",
+    "no_think": "--no-think",
 }
 
 
@@ -178,6 +180,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="allow the model repository to run custom code",
     )
+    local.add_argument(
+        "--no-think",
+        action="store_true",
+        default=None,
+        help="disable the thinking phase of reasoning models such as Qwen3",
+    )
     run_parser.set_defaults(handler=run)
 
     return parser
@@ -233,8 +241,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # The HTTP clients log every API request at INFO; only surface warnings and errors.
     for name in ("httpx", "httpx2"):
         logging.getLogger(name).setLevel(logging.WARNING)
-    # transformers repeats generation-config warnings on every row; keep errors only.
-    logging.getLogger("transformers").setLevel(logging.ERROR)
+    # transformers repeats generation-config warnings on every row. It resets its
+    # logger level when first imported, so set the level it reads from the environment.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     args.handler(args)
 
 

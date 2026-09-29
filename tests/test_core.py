@@ -145,7 +145,14 @@ def fake_huggingface(monkeypatch):
     :return: Dict recording pipeline and chat model construction arguments.
     """
     recorded = {}
-    tokenizer = object()
+
+    class FakeTokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            """Record template arguments and render a predictable prompt."""
+            recorded["template"] = kwargs
+            return f"<chat>{messages[0]['content']}"
+
+    tokenizer = FakeTokenizer()
 
     class FakeHuggingFacePipeline:
         @classmethod
@@ -157,21 +164,18 @@ def fake_huggingface(monkeypatch):
             instance.pipeline = SimpleNamespace(model=model, tokenizer=tokenizer)
             return instance
 
-    class FakeChatHuggingFace:
-        def __init__(self, **kwargs):
-            """Record chat model arguments."""
-            recorded["chat"] = kwargs
+        def invoke(self, text):
+            """Return a completion echoing the rendered prompt."""
+            return f"reply to {text}"
 
     langchain_huggingface = ModuleType("langchain_huggingface")
     langchain_huggingface.HuggingFacePipeline = FakeHuggingFacePipeline
-    langchain_huggingface.ChatHuggingFace = FakeChatHuggingFace
     torch = ModuleType("torch")
     torch.cuda = SimpleNamespace(is_available=lambda: False)
     torch.backends = SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False))
 
     monkeypatch.setitem(sys.modules, "langchain_huggingface", langchain_huggingface)
     monkeypatch.setitem(sys.modules, "torch", torch)
-    recorded["tokenizer"] = tokenizer
     return recorded
 
 
@@ -192,7 +196,31 @@ def test_build_local_llm_defaults_to_greedy_decoding(fake_huggingface):
         "do_sample": False,
         "return_full_text": False,
     }
-    assert fake_huggingface["chat"]["tokenizer"] is fake_huggingface["tokenizer"]
+
+
+def test_build_local_llm_applies_chat_template(fake_huggingface):
+    """Verify prompts are wrapped in the chat template before generation.
+
+    :param fake_huggingface: Recorded fake Hugging Face arguments.
+    """
+    llm = core.build_local_llm(core.LocalModelConfig(model="org/model"))
+
+    response = llm.invoke("Summarize Ada")
+
+    assert response.content == "reply to <chat>Summarize Ada"
+    assert fake_huggingface["template"] == {"tokenize": False, "add_generation_prompt": True}
+
+
+def test_build_local_llm_disables_thinking(fake_huggingface):
+    """Verify ``no_think`` passes ``enable_thinking=False`` to the chat template.
+
+    :param fake_huggingface: Recorded fake Hugging Face arguments.
+    """
+    llm = core.build_local_llm(core.LocalModelConfig(model="org/model", no_think=True))
+
+    llm.invoke("Summarize Ada")
+
+    assert fake_huggingface["template"]["enable_thinking"] is False
 
 
 def test_build_local_llm_passes_sampling_settings(fake_huggingface):

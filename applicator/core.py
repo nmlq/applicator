@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
 from .readers import read_csv, read_json
@@ -24,6 +25,8 @@ class LocalModelConfig:
     :param top_k: Number of highest-probability tokens considered when sampling.
     :param repetition_penalty: Penalty applied to repeated tokens.
     :param trust_remote_code: Allow model repositories to run custom code.
+    :param no_think: Disable the thinking phase of reasoning models such as
+        Qwen3; templates without a thinking switch ignore it.
     """
 
     model: str
@@ -35,6 +38,37 @@ class LocalModelConfig:
     top_k: Optional[int] = None
     repetition_penalty: Optional[float] = None
     trust_remote_code: bool = False
+    no_think: bool = False
+
+
+class LocalChatModel:
+    """Chat wrapper that applies the model's chat template before generating.
+
+    ``ChatHuggingFace`` cannot forward chat template arguments such as
+    ``enable_thinking``, so this applies the template itself.
+
+    :param pipeline: ``HuggingFacePipeline`` configured for text generation.
+    :param chat_template_kwargs: Extra arguments for ``apply_chat_template``.
+    """
+
+    def __init__(self, pipeline, chat_template_kwargs: Optional[dict] = None):
+        self.pipeline = pipeline
+        self.tokenizer = pipeline.pipeline.tokenizer
+        self.chat_template_kwargs = chat_template_kwargs or {}
+
+    def invoke(self, prompt: str) -> AIMessage:
+        """Generate a reply to one user message.
+
+        :param prompt: User message text.
+        :return: Message containing only the generated reply.
+        """
+        text = self.tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
+            **self.chat_template_kwargs,
+        )
+        return AIMessage(content=self.pipeline.invoke(text))
 
 
 def build_openai_llm(
@@ -70,7 +104,7 @@ def build_local_llm(config: LocalModelConfig):
     # Imported lazily: torch and transformers are large, optional dependencies.
     try:
         import torch
-        from langchain_huggingface import ChatHuggingFace, HuggingFacePipeline
+        from langchain_huggingface import HuggingFacePipeline
     except ImportError as error:
         raise RuntimeError(
             "Local models need the optional dependencies. "
@@ -114,8 +148,9 @@ def build_local_llm(config: LocalModelConfig):
     if model.device.type == "cpu" and gpu_available:
         logger.warning("Model is on CPU although a GPU is available; pass --device to select it")
 
-    # Reuse the pipeline's tokenizer so the chat template isn't loaded twice.
-    return ChatHuggingFace(llm=pipeline, tokenizer=pipeline.pipeline.tokenizer)
+    # Qwen3-style templates pre-fill an empty think block when this is False.
+    chat_template_kwargs = {"enable_thinking": False} if config.no_think else {}
+    return LocalChatModel(pipeline, chat_template_kwargs)
 
 
 def apply_prompt_to_csv(
