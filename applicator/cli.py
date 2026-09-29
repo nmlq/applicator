@@ -129,6 +129,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="applicator_output",
         help="name of the generated CSV column (default: applicator_output)",
     )
+    run_parser.add_argument(
+        "--batch-size",
+        type=positive_int,
+        default=1,
+        help="rows processed together: one GPU batch for a local model, "
+        "concurrent requests for an API (default: 1)",
+    )
 
     # Local model options load a Hugging Face model in-process instead of calling an API.
     local = run_parser.add_argument_group(
@@ -227,6 +234,7 @@ def run(args: argparse.Namespace) -> None:
         api_key=args.api_key,
         output_column=args.output_column,
         local_model=local_model,
+        batch_size=args.batch_size,
     )
 
 

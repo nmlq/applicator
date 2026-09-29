@@ -61,6 +61,7 @@ def test_build_parser_parses_run_options(tmp_path):
     assert args.base_url == "https://example.test/v1"
     assert args.api_key == "test-key"
     assert args.output_column == "result"
+    assert args.batch_size == 1
 
 
 def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
@@ -89,6 +90,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         api_key=None,
         output_column="result",
         local_model=None,
+        batch_size=4,
     )
     cli.run(args)
 
@@ -102,6 +104,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         "api_key": None,
         "output_column": "result",
         "local_model": None,
+        "batch_size": 4,
     }
 
 
@@ -218,6 +221,7 @@ def test_run_uses_local_model_defaults(monkeypatch, tmp_path):
         (["--no-think"], "--no-think requires --local-model"),
         (["--load-in-4bit"], "--load-in-4bit requires --local-model"),
         (["--local-model", "m", "--max-new-tokens", "0"], "must be at least 1"),
+        (["--batch-size", "0"], "must be at least 1"),
     ],
 )
 def test_main_rejects_invalid_local_options(tmp_path, capsys, options, message):

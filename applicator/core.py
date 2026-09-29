@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, List, Optional
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
@@ -65,13 +65,25 @@ class LocalChatModel:
         :param prompt: User message text.
         :return: Message containing only the generated reply.
         """
-        text = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
-            tokenize=False,
-            add_generation_prompt=True,
-            **self.chat_template_kwargs,
-        )
-        return AIMessage(content=self.pipeline.invoke(text))
+        return self.batch([prompt])[0]
+
+    def batch(self, prompts: List[str]) -> List[AIMessage]:
+        """Generate replies to several user messages in one pass on the device.
+
+        :param prompts: User message texts.
+        :return: One message per prompt, in the same order.
+        """
+        texts = [
+            self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+                **self.chat_template_kwargs,
+            )
+            for prompt in prompts
+        ]
+        # HuggingFacePipeline.batch sends the prompts to the model as padded batches.
+        return [AIMessage(content=text) for text in self.pipeline.batch(texts)]
 
 
 def build_openai_llm(
@@ -123,10 +135,11 @@ def build_4bit_config(dtype: str):
     )
 
 
-def build_local_llm(config: LocalModelConfig):
+def build_local_llm(config: LocalModelConfig, batch_size: int = 1):
     """Load a Hugging Face model into this process for local generation.
 
     :param config: Local model and generation settings.
+    :param batch_size: Number of prompts generated together on the device.
     :return: Chat model whose ``invoke`` runs on the local device.
     :raises RuntimeError: If the optional local-model dependencies are missing.
     """
@@ -176,7 +189,11 @@ def build_local_llm(config: LocalModelConfig):
         device_map=config.device,
         model_kwargs=model_kwargs,
         pipeline_kwargs=generation,
+        batch_size=batch_size,
     )
+    # Batched generation must pad on the left so every prompt ends where
+    # generation starts; right padding corrupts the shorter prompts' output.
+    pipeline.pipeline.tokenizer.padding_side = "left"
     model = pipeline.pipeline.model
     logger.info("Model loaded on %s", model.device)
     gpu_available = torch.cuda.is_available() or torch.backends.mps.is_available()
@@ -186,6 +203,32 @@ def build_local_llm(config: LocalModelConfig):
     # Qwen3-style templates pre-fill an empty think block when this is False.
     chat_template_kwargs = {"enable_thinking": False} if config.no_think else {}
     return LocalChatModel(pipeline, chat_template_kwargs)
+
+
+def make_transform(llm, prompt_template: str) -> Callable[[List[str]], List[str]]:
+    """Build the batch transform that sends CSV values to a language model.
+
+    :param llm: Chat model with a ``batch`` method, local or API-backed.
+    :param prompt_template: Prompt containing the ``{input}`` placeholder.
+    :return: Function mapping CSV values to model replies, in the same order.
+    """
+
+    def apply(values: List[str]) -> List[str]:
+        """Transform a batch of CSV values by invoking the configured language model.
+
+        :param values: CSV values to insert into the prompt template.
+        :return: Text content returned by the language model, one per value.
+        """
+        # Formatting happens per row so each request receives the current value.
+        prompts = [prompt_template.format(input=value) for value in values]
+        responses = llm.batch(prompts)
+        # Normalize provider-specific response content into text for the CSV writer.
+        return [
+            response.content if isinstance(response.content, str) else str(response.content)
+            for response in responses
+        ]
+
+    return apply
 
 
 def apply_prompt_to_csv(
@@ -198,6 +241,7 @@ def apply_prompt_to_csv(
     api_key: Optional[str] = None,
     output_column: str = "applicator_output",
     local_model: Optional[LocalModelConfig] = None,
+    batch_size: int = 1,
 ) -> None:
     """Apply a prompt-driven LLM transformation to a CSV column.
 
@@ -211,6 +255,8 @@ def apply_prompt_to_csv(
     :param output_column: Destination column for model responses.
     :param local_model: When set, run this Hugging Face model locally instead
         of calling an API; ``model``, ``base_url`` and ``api_key`` are unused.
+    :param batch_size: Rows processed together: generated as one batch on a
+        local model, or sent as concurrent requests to an API.
     """
     # Validate the prompt before creating the client or opening the output file.
     logger.info("Loading prompt from %s", prompt_json)
@@ -218,28 +264,17 @@ def apply_prompt_to_csv(
 
     # The model is created once and reused for every row.
     if local_model:
-        llm = build_local_llm(local_model)
+        llm = build_local_llm(local_model, batch_size=batch_size)
     else:
         llm = build_openai_llm(model, base_url=base_url, api_key=api_key)
 
-    def apply(value: str) -> str:
-        """Transform one CSV value by invoking the configured language model.
-
-        :param value: CSV value to insert into the prompt template.
-        :return: Text content returned by the language model.
-        """
-        # Formatting happens per row so each request receives the current value.
-        prompt = prompt_template.format(input=value)
-        response = llm.invoke(prompt)
-        # Normalize provider-specific response content into text for the CSV writer.
-        return response.content if isinstance(response.content, str) else str(response.content)
-
-    logger.info("Processing column '%s' from %s", column, input_csv)
+    logger.info("Processing column '%s' from %s (batch size %d)", column, input_csv, batch_size)
     read_csv(
         input_csv=input_csv,
         output_csv=output_csv,
         input_column=column,
         output_column=output_column,
-        transform=apply,
+        transform=make_transform(llm, prompt_template),
+        batch_size=batch_size,
     )
     logger.info("Done. Results written to %s", output_csv)

@@ -121,6 +121,7 @@ applicator run input.csv prompt.json \
 | `--base-url` | — | no | provider default | OpenAI-compatible API base URL |
 | `--api-key` | — | no | provider environment | API key |
 | `--output-column` | — | no | `applicator_output` | Name of the generated column |
+| `--batch-size` | — | no | `1` | Rows processed together; see [Batching](#batching) |
 
 For an OpenAI-compatible local endpoint:
 
@@ -363,6 +364,70 @@ slower on this GPU. `Qwen/Qwen3-14B` does not fit in 24 GB at full precision;
 try it with `--load-in-4bit --dtype float32` (untested on the P40, and
 `bitsandbytes` support for Pascal GPUs is limited).
 
+### Batching
+
+`--batch-size N` processes N rows at a time. With a local model, the N prompts
+run through the GPU as one batch, which uses the GPU far better than one row
+at a time. With an API, the N requests are sent concurrently.
+
+```bash
+applicator run input.csv prompt.json \
+  --column text \
+  --output output.csv \
+  --local-model Qwen/Qwen3-4B \
+  --device cuda \
+  --no-think \
+  --max-new-tokens 256 \
+  --batch-size 8
+```
+
+In testing on Apple Silicon with Qwen3-14B, `--batch-size 4` processed rows
+about three times faster than `--batch-size 1`.
+
+Outputs can differ slightly between batch sizes, even with greedy decoding
+(no `--temperature`). A batch is computed with different GPU kernels than a
+single row, so the arithmetic rounds differently, and when two next words are
+almost equally likely the model can pick the other one. The rest of the
+answer then differs in wording. Smaller models are affected more often than
+larger ones.
+
+To find a good value, run the [batch size benchmark](#batch-size-benchmark)
+or start at 4 and double it while the rows per second shown in the progress
+bar keep improving. Larger batches use more GPU memory,
+because each row in the batch needs its own working memory for generation, so
+the limit is lower for long inputs and large `--max-new-tokens`. If a run
+fails with `torch.OutOfMemoryError`, halve the batch size. Rows in a batch are
+padded to the longest input in that batch, so inputs of very different lengths
+waste some of the work.
+
+Output is written and flushed after each batch, so an interrupted run loses
+at most one batch of rows.
+
+### Batch size benchmark
+
+`scripts/benchmark_batch_size.py` loads a local model once and processes the
+same rows at several batch sizes. By default it uses 64 synthetic MRI reports
+from `tests/fixtures/mri_reports.example.csv`, so no external data is needed.
+For each batch size it prints the time, rows per second, speedup over the
+first batch size, peak GPU memory (NVIDIA only), and how many outputs match
+the first batch size:
+
+```bash
+python scripts/benchmark_batch_size.py \
+  --local-model Qwen/Qwen3-4B \
+  --device cuda \
+  --dtype float32 \
+  --no-think \
+  --batch-sizes 1 2 4 8 16 32
+```
+
+The benchmark accepts `--device`, `--dtype`, `--max-new-tokens` (default
+256), `--no-think` and `--load-in-4bit` with the same meaning as for
+`applicator run`. Use `--rows N` for a quicker run on the first N rows,
+`--input`, `--prompt` and `--column` to benchmark other data, and
+`--output-dir` to keep each run's CSV. When a batch size runs out of GPU
+memory, the benchmark reports it and skips larger sizes.
+
 ### Logging
 
 `transformers` warnings are suppressed because many of them repeat for every
@@ -440,17 +505,19 @@ to produce live results.
 
 ## Processing behavior
 
-- Reads CSV rows with Python's streaming `csv` module instead of loading the
-  entire file into memory.
-- Makes one LLM invocation per input row. A local model is loaded once
-  before the first row and reused for every row.
+- Reads the CSV with pandas one batch at a time instead of loading the entire
+  file into memory.
+- Sends rows to the model in batches of `--batch-size` rows (default 1). A
+  local model generates a batch together on the GPU; an API receives the
+  batch's requests concurrently. A local model is loaded once before the first
+  batch and reused for every batch.
 - Preserves all original CSV columns.
 - Adds the generated response to `applicator_output` by default.
-- Writes and flushes each completed row immediately.
+- Writes and flushes each completed batch immediately.
 - Prints progress for each processed row.
 - Raises an error when the input CSV has no header or the requested column is
   missing.
-- Does not implement batching, concurrency, agents, or MCP.
+- Does not implement agents or MCP.
 
 ## Tests
 
@@ -479,6 +546,12 @@ Reusable example inputs are stored in `tests/fixtures/`:
   sample rows.
 - `tests/fixtures/prompt.example.json` contains a valid prompt using
   `{input}`.
+- `tests/fixtures/mri_reports.example.csv` contains `id` and `report` columns
+  with 64 synthetic MRI reports of 8 to 153 words. The reports are generated
+  from fictional findings and contain no patient data. The batch size
+  benchmark uses them by default.
+- `tests/fixtures/mri_prompt.example.json` asks for a one-sentence summary of
+  a report.
 
 The fixture paths are exposed as the `example_input_csv` and
 `example_prompt_json` pytest fixtures in `tests/conftest.py`.
@@ -491,6 +564,8 @@ applicator/
 │   ├── cli.py       # argparse command-line interface
 │   ├── core.py      # API and local model setup, CSV processing
 │   └── readers.py   # JSON prompt and CSV readers
+├── scripts/
+│   └── benchmark_batch_size.py # Local model throughput by batch size
 ├── tests/
 │   ├── fixtures/    # Reusable CSV and JSON test inputs
 │   ├── conftest.py  # Shared pytest fixtures and test stubs

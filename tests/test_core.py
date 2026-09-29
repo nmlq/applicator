@@ -20,20 +20,22 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
             """Record model construction arguments."""
             llm_kwargs.update(kwargs)
 
-        def invoke(self, prompt):
-            """Return predictable content for a model request."""
-            calls.append(prompt)
-            if prompt.endswith("Ada"):
-                return SimpleNamespace(content="Summary")
-            return SimpleNamespace(content=["non-string", "content"])
+        def batch(self, prompts):
+            """Return predictable content for a batch of model requests."""
+            calls.append(prompts)
+            return [
+                SimpleNamespace(content="Summary")
+                if prompt.endswith("Ada")
+                else SimpleNamespace(content=["non-string", "content"])
+                for prompt in prompts
+            ]
 
     captured = {}
 
     def fake_read_csv(**kwargs):
-        """Capture the CSV reader callback and exercise two values."""
+        """Capture the CSV reader callback and exercise one batch of two values."""
         captured.update(kwargs)
-        captured["first_result"] = kwargs["transform"]("Ada")
-        captured["second_result"] = kwargs["transform"]("Grace")
+        captured["results"] = kwargs["transform"](["Ada", "Grace"])
 
     monkeypatch.setattr(core, "ChatOpenAI", FakeLLM)
     monkeypatch.setattr(core, "read_json", lambda path: "Summarize {input}")
@@ -48,6 +50,7 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
         base_url="https://example.test/v1",
         api_key="test-key",
         output_column="summary",
+        batch_size=2,
     )
 
     assert llm_kwargs == {
@@ -55,11 +58,11 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
         "base_url": "https://example.test/v1",
         "api_key": "test-key",
     }
-    assert calls == ["Summarize Ada", "Summarize Grace"]
+    assert calls == [["Summarize Ada", "Summarize Grace"]]
     assert captured["input_column"] == "name"
     assert captured["output_column"] == "summary"
-    assert captured["first_result"] == "Summary"
-    assert captured["second_result"] == "['non-string', 'content']"
+    assert captured["batch_size"] == 2
+    assert captured["results"] == ["Summary", "['non-string', 'content']"]
 
 
 def test_apply_prompt_to_csv_omits_optional_llm_arguments(monkeypatch, tmp_path):
@@ -99,9 +102,9 @@ def test_apply_prompt_to_csv_uses_local_model_when_configured(monkeypatch, tmp_p
     built = []
 
     class FakeLocalLLM:
-        def invoke(self, prompt):
-            """Return predictable content for a local generation."""
-            return SimpleNamespace(content=f"local: {prompt}")
+        def batch(self, prompts):
+            """Return predictable content for a batch of local generations."""
+            return [SimpleNamespace(content=f"local: {prompt}") for prompt in prompts]
 
     def fail_openai(**kwargs):
         """Fail if the API client is created for a local run."""
@@ -110,12 +113,12 @@ def test_apply_prompt_to_csv_uses_local_model_when_configured(monkeypatch, tmp_p
     captured = {}
 
     def fake_read_csv(**kwargs):
-        """Exercise the transform with one value."""
-        captured["result"] = kwargs["transform"]("Ada")
+        """Exercise the transform with one batch."""
+        captured["result"] = kwargs["transform"](["Ada"])
 
-    def fake_build_local_llm(config):
+    def fake_build_local_llm(config, batch_size):
         """Record the config and return a fake local model."""
-        built.append(config)
+        built.append((config, batch_size))
         return FakeLocalLLM()
 
     monkeypatch.setattr(core, "ChatOpenAI", fail_openai)
@@ -131,10 +134,11 @@ def test_apply_prompt_to_csv_uses_local_model_when_configured(monkeypatch, tmp_p
         output_csv=tmp_path / "output.csv",
         model="unused",
         local_model=config,
+        batch_size=8,
     )
 
-    assert built == [config]
-    assert captured["result"] == "local: Summarize Ada"
+    assert built == [(config, 8)]
+    assert captured["result"] == ["local: Summarize Ada"]
 
 
 @pytest.fixture
@@ -164,9 +168,10 @@ def fake_huggingface(monkeypatch):
             instance.pipeline = SimpleNamespace(model=model, tokenizer=tokenizer)
             return instance
 
-        def invoke(self, text):
-            """Return a completion echoing the rendered prompt."""
-            return f"reply to {text}"
+        def batch(self, texts):
+            """Record one batch and return completions echoing the prompts."""
+            recorded.setdefault("batches", []).append(texts)
+            return [f"reply to {text}" for text in texts]
 
     langchain_huggingface = ModuleType("langchain_huggingface")
     langchain_huggingface.HuggingFacePipeline = FakeHuggingFacePipeline
@@ -196,6 +201,25 @@ def test_build_local_llm_defaults_to_greedy_decoding(fake_huggingface):
         "do_sample": False,
         "return_full_text": False,
     }
+    assert pipeline["batch_size"] == 1
+
+
+def test_build_local_llm_batches_prompts_with_left_padding(fake_huggingface):
+    """Verify prompts are templated and generated as one left-padded batch.
+
+    :param fake_huggingface: Recorded fake Hugging Face arguments.
+    """
+    llm = core.build_local_llm(core.LocalModelConfig(model="org/model"), batch_size=2)
+
+    responses = llm.batch(["Ada", "Grace"])
+
+    assert fake_huggingface["pipeline"]["batch_size"] == 2
+    assert llm.tokenizer.padding_side == "left"
+    assert fake_huggingface["batches"] == [["<chat>Ada", "<chat>Grace"]]
+    assert [response.content for response in responses] == [
+        "reply to <chat>Ada",
+        "reply to <chat>Grace",
+    ]
 
 
 def test_build_local_llm_applies_chat_template(fake_huggingface):
