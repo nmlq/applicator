@@ -1,7 +1,9 @@
 # Applicator
 
-Applicator is a small Python CLI that applies an LLM prompt to one CSV column,
-one row at a time, and writes the result into a new CSV column.
+Applicator is a small Python CLI that applies an LLM prompt to every value in
+one CSV column and writes each result into a new CSV column. It can call an
+OpenAI-compatible API, such as OpenAI or a local Ollama server, or run a
+Hugging Face model on the local GPU, and it can process rows in batches.
 
 ## Requirements
 
@@ -36,6 +38,14 @@ pip install -e '.[local]'
 On Linux with an NVIDIA GPU, check that the installed `torch` build matches
 your driver and GPU before running a model; see
 [NVIDIA GPUs](#nvidia-gpus).
+
+`--load-in-4bit` also needs `bitsandbytes`, which is not part of the `local`
+extra. Install it with `--no-deps`: `bitsandbytes` depends on `torch`, and a
+normal install can replace a working CUDA build of torch with the default one:
+
+```bash
+pip install --no-deps bitsandbytes
+```
 
 Install pytest separately when running the test suite:
 
@@ -399,9 +409,15 @@ watch -n1 nvidia-smi
 ```
 
 `Qwen/Qwen3-8B` with `--dtype float16` also fits (about 16 GB) but may be
-slower on this GPU. `Qwen/Qwen3-14B` does not fit in 24 GB at full precision;
-try it with `--load-in-4bit --dtype float32` (untested on the P40, and
-`bitsandbytes` support for Pascal GPUs is limited).
+slower on this GPU.
+
+`Qwen/Qwen3-14B` does not fit in 24 GB at full precision. With
+`--load-in-4bit --dtype float32` it loads and runs on the P40, but slowly:
+about 5.2 seconds per report at `--batch-size 8`, and batch sizes 16 and 32
+ran out of memory with real MRI reports. The same model through
+[Ollama](#ollama) with `--no-think` ran at about 1.2 seconds per report. For
+14B models on the P40, use Ollama. See
+[Performance baselines](#performance-baselines) for the measurements.
 
 ### Batching
 
@@ -475,6 +491,149 @@ row. Set `TRANSFORMERS_VERBOSITY=warning` to show them when debugging:
 ```bash
 TRANSFORMERS_VERBOSITY=warning applicator run ...
 ```
+
+## Performance baselines
+
+These measurements were taken while developing local model support and
+batching. They show relative differences between configurations; absolute
+times depend on the GPU, the length of the inputs and answers, and the
+prompt. Unless noted, answers were one-sentence summaries.
+
+### Test machines
+
+| | Apple Silicon Mac | Linux server |
+| --- | --- | --- |
+| GPU | Apple Silicon GPU (`mps`), unified memory | NVIDIA Tesla P40, 24 GB |
+| Driver and CUDA | — | driver 560.35.05, CUDA 12.6 |
+| Python | 3.14 | 3.12 |
+| torch | 2.14.0 | 2.14.0+cu126 |
+| transformers | 5.17.0 | 5.x |
+| Ollama | 0.34.4 | not recorded |
+
+Inputs:
+
+- **Example fixture**: the two short rows in `tests/fixtures/input.example.csv`.
+- **Synthetic MRI reports**: the 64 fictional reports in
+  `tests/fixtures/mri_reports.example.csv`, 8 to 153 words each.
+- **Real MRI reports**: a private set of reports, not included in the
+  repository. A sampled report was about 440 tokens. In one batch of 16, the
+  longest prompt, including the instructions and chat template, was about
+  1,600 tokens.
+
+### Qwen3-14B on the Tesla P40, real MRI reports
+
+| Engine and settings | `--batch-size` | Seconds per report | Rows measured |
+| --- | --- | --- | --- |
+| `--local-model`, `float32` | — | does not fit (needs ~59 GB) | — |
+| `--local-model`, `--load-in-4bit --dtype float32 --no-think` | 32 | out of GPU memory | — |
+| `--local-model`, `--load-in-4bit --dtype float32 --no-think` | 16 | out of GPU memory | — |
+| `--local-model`, `--load-in-4bit --dtype float32 --no-think` | 8 | 5.24 | 744 |
+| Ollama `qwen3:14b`, thinking on | 4 | 7.72 | 112 |
+| Ollama `qwen3:14b`, thinking on (`/no_think` in the prompt, ignored) | 4 | 9.30 | 8 |
+| Ollama `qwen3:14b`, `--no-think` | 4 | **1.15** | 16 |
+
+Ollama ran with `OLLAMA_NUM_PARALLEL=4` and `OLLAMA_CONTEXT_LENGTH=4096`; the
+model used 11.3 GB of GPU memory and ran `100% GPU`. The 8-row and 16-row
+figures are early readings from longer runs; the 8-row figure may include
+Ollama loading the model after a restart.
+
+### One report on the Tesla P40, Ollama `qwen3:14b`
+
+Timed with Ollama's native API, one request at a time:
+
+| Thinking | Prompt tokens | Prompt time | Answer tokens | Answer time | Total |
+| --- | --- | --- | --- | --- | --- |
+| on | 442 | 1.1 s (407 tokens/s) | 458 | 18.7 s (24.5 tokens/s) | 20.2 s |
+| off | 445 | 1.1 s (421 tokens/s) | 45 | 1.8 s (25.1 tokens/s) | **3.1 s** |
+
+The P40 reads a report at about 400 tokens per second and writes the answer
+at about 25 tokens per second, so the number of generated tokens dominates
+the time. Hidden thinking added about 400 tokens per report.
+
+### Batch sizes on the Tesla P40, Qwen3-4B
+
+`scripts/benchmark_batch_size.py` with `--local-model Qwen/Qwen3-4B --device
+cuda --dtype float32 --no-think --max-new-tokens 256` on the 64 synthetic MRI
+reports:
+
+| `--batch-size` | Seconds | Rows per second | Speedup | Peak GPU memory | Outputs matching batch size 1 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 132.7 | 0.48 | 1.00× | 16.2 GB | 64/64 |
+| 2 | 93.6 | 0.68 | 1.42× | 16.4 GB | 64/64 |
+| 4 | 65.4 | 0.98 | 2.03× | 16.6 GB | 64/64 |
+| 8 | 52.6 | 1.22 | 2.52× | 17.2 GB | 64/64 |
+| 16 | 42.8 | 1.49 | 3.10× | 18.2 GB | 64/64 |
+| 32 | 37.5 | 1.71 | 3.54× | 20.3 GB | 64/64 |
+
+The gain per doubling shrinks as batches grow, and memory grows with batch
+size. These reports are short; with the real reports, which are several
+times longer, each row in a batch needs several times more memory, so the
+largest batch size that fits is lower.
+
+### Apple Silicon Mac
+
+Qwen3-14B as a local model (`--dtype auto`, which loads `bfloat16` weights):
+
+| Input | Settings | `--batch-size` | Result |
+| --- | --- | --- | --- |
+| Example fixture, 2 rows | thinking on, `--max-new-tokens 1024` | 1 | 31.2 s per row |
+| Example fixture, 2 rows | `--no-think --max-new-tokens 256` | 1 | 2.08 s per row |
+| 8 short rows | `--no-think --max-new-tokens 24` | 1 | 22 s for 8 rows |
+| 8 short rows | `--no-think --max-new-tokens 24` | 4 | 7 s for 8 rows |
+
+All 8 short-row outputs were identical at batch sizes 1 and 4.
+
+SmolLM2-135M-Instruct as a local model, benchmarked on the first 16 synthetic
+MRI reports with `--max-new-tokens 64`:
+
+| `--batch-size` | Rows per second | Speedup | Outputs matching batch size 1 |
+| --- | --- | --- | --- |
+| 1 | 3.52 | 1.00× | 16/16 |
+| 4 | 5.40 | 1.53× | 13/16 |
+| 8 | 8.38 | 2.38× | 12/16 |
+| 16 | 11.49 | 3.26× | 11/16 |
+
+The mismatched outputs were reworded summaries of the same report, not
+corrupted text; see [Batching](#batching) for why this happens.
+
+Ollama `qwen3:1.7b` through Applicator, 8 synthetic MRI reports with
+`--batch-size 4`: 13.6 seconds with thinking on and 2.95 seconds with
+`--no-think`, including start-up.
+
+### Model load times
+
+| Model | Machine | Load time |
+| --- | --- | --- |
+| Qwen3-4B, `float32` | Tesla P40 | ~65 s on first run, including a 4 GB download |
+| Qwen3-14B, `--load-in-4bit` | Tesla P40 | ~24 s from the local cache |
+| Qwen3-14B, `bfloat16` | Apple Silicon | ~10 s from the local cache |
+
+A local model is loaded once per run, so load time matters only for short
+runs.
+
+### GPU clocks during a long run
+
+During the Ollama runs the P40 was at 84 °C and 100% utilization, drawing
+about 240 W of its 250 W limit. Its clock stayed at the 1531 MHz maximum and
+`nvidia-smi -q -d PERFORMANCE` showed no thermal slowdown, only
+`SW Power Cap: Active`. To check a GPU for throttling during a run:
+
+```bash
+nvidia-smi --query-gpu=temperature.gpu,clocks.sm,clocks.max.sm,power.draw --format=csv -l 2
+```
+
+### Takeaways
+
+- **Turn thinking off** with `--no-think` for reasoning models. It was the
+  largest single speedup: 6.5 times faster for one report on the P40.
+- **Batch rows.** On the P40, Qwen3-4B processed rows 3.5 times faster at
+  `--batch-size 32` than at 1. Pick the largest batch size that fits in GPU
+  memory with your real inputs; longer inputs lower the limit.
+- **On older NVIDIA GPUs, run 14B models through Ollama.** On the P40,
+  Ollama with `--no-think` and 4 parallel requests was about 4.5 times faster
+  than a 4-bit local model, and fit comfortably in memory.
+- **Use local models on Apple Silicon or recent NVIDIA GPUs,** or with models
+  small enough to run at full precision, such as Qwen3-4B on the P40.
 
 ## Environment variables
 
@@ -571,7 +730,7 @@ make network requests, download models, or require an API key or a GPU. The
 suite covers:
 
 - JSON prompt validation
-- CSV transformation and validation
+- CSV transformation and validation, including batched processing
 - LLM configuration and response conversion
 - Local model loading, generation settings, and the `--no-think` switch for
   local models and APIs
@@ -600,6 +759,8 @@ The fixture paths are exposed as the `example_input_csv` and
 
 ```text
 applicator/
+├── .claude/
+│   └── CLAUDE.md    # Rules for Claude Code in this repository
 ├── applicator/
 │   ├── cli.py       # argparse command-line interface
 │   ├── core.py      # API and local model setup, CSV processing
