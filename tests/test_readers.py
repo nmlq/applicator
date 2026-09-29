@@ -57,7 +57,7 @@ def test_read_csv_transforms_rows_and_preserves_columns(tmp_path, capsys):
         output_csv=output_path,
         input_column="name",
         output_column="greeting",
-        transform=lambda value: f"Hello {value}",
+        transform=lambda values: [f"Hello {value}" for value in values],
     )
 
     with output_path.open(newline="", encoding="utf-8") as file:
@@ -114,7 +114,7 @@ def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
         output_csv=output_path,
         input_column="text",
         output_column="result",
-        transform=lambda value: prompt.format(input=value),
+        transform=lambda values: [prompt.format(input=value) for value in values],
     )
 
     with output_path.open(newline="", encoding="utf-8") as file:
@@ -138,3 +138,27 @@ def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
             ),
         },
     ]
+
+
+def test_read_csv_passes_rows_in_batches(tmp_path):
+    """Verify rows are transformed in batches and written in input order.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("name\nAda\nGrace\nLinus\n", encoding="utf-8")
+    batches = []
+
+    def transform(values):
+        """Record each batch and upper-case its values."""
+        batches.append(values)
+        return [value.upper() for value in values]
+
+    read_csv(input_path, output_path, "name", "result", transform, batch_size=2)
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert batches == [["Ada", "Grace"], ["Linus"]]
+    assert [row["result"] for row in rows] == ["ADA", "GRACE", "LINUS"]

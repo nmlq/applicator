@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Callable, List
 
 import pandas
 from tqdm import tqdm
@@ -36,7 +36,8 @@ def read_csv(
     output_csv: Path,
     input_column: str,
     output_column: str,
-    transform: Callable[[str], str],
+    transform: Callable[[List[str]], List[str]],
+    batch_size: int = 1,
 ) -> None:
     """Transform one CSV column and write the results to another CSV file.
 
@@ -44,7 +45,9 @@ def read_csv(
     :param output_csv: Destination CSV file.
     :param input_column: Column whose values are transformed.
     :param output_column: Column receiving transformed values.
-    :param transform: Function applied to each input value.
+    :param transform: Function mapping a batch of input values to one output
+        value each, in the same order.
+    :param batch_size: Number of rows passed to each ``transform`` call.
     :raises ValueError: If the input has no header or the column is missing.
     """
     # Read only the header first so validation happens before any output exists.
@@ -72,11 +75,13 @@ def read_csv(
         logger.info("Writing results to %s", output_csv)
         # Route log records through tqdm so they don't garble the progress bar.
         with logging_redirect_tqdm():
-            # chunksize=1 buffers a single row at a time instead of the whole file.
+            # chunksize buffers one batch of rows at a time instead of the whole file.
             # No total: counting rows would mean reading the file twice.
-            chunks = pandas.read_csv(input_csv, chunksize=1, **read_options)
-            for chunk_df in tqdm(chunks, desc="Processing rows", unit="row"):
-                chunk_df[output_column] = chunk_df[input_column].map(transform)
-                chunk_df.to_csv(dst, columns=fieldnames, header=False, index=False)
-                # Flush each row so completed work remains available immediately.
-                dst.flush()
+            chunks = pandas.read_csv(input_csv, chunksize=batch_size, **read_options)
+            with tqdm(desc="Processing rows", unit="row") as progress:
+                for chunk_df in chunks:
+                    chunk_df[output_column] = transform(chunk_df[input_column].tolist())
+                    chunk_df.to_csv(dst, columns=fieldnames, header=False, index=False)
+                    # Flush each batch so completed work remains available immediately.
+                    dst.flush()
+                    progress.update(len(chunk_df))
