@@ -91,6 +91,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         output_column="result",
         local_model=None,
         batch_size=4,
+        no_think=True,
     )
     cli.run(args)
 
@@ -105,6 +106,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         "output_column": "result",
         "local_model": None,
         "batch_size": 4,
+        "no_think": True,
     }
 
 
@@ -218,7 +220,6 @@ def test_run_uses_local_model_defaults(monkeypatch, tmp_path):
         (["--local-model", "m", "--api-key", "k"], "--api-key cannot be used with --local-model"),
         (["--temperature", "0.5"], "--temperature requires --local-model"),
         (["--trust-remote-code"], "--trust-remote-code requires --local-model"),
-        (["--no-think"], "--no-think requires --local-model"),
         (["--load-in-4bit"], "--load-in-4bit requires --local-model"),
         (["--local-model", "m", "--max-new-tokens", "0"], "must be at least 1"),
         (["--batch-size", "0"], "must be at least 1"),

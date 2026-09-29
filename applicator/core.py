@@ -90,12 +90,15 @@ def build_openai_llm(
     model: str,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    no_think: bool = False,
 ) -> ChatOpenAI:
     """Build a client for an OpenAI-compatible API.
 
     :param model: Model identifier passed to ``ChatOpenAI``.
     :param base_url: Optional OpenAI-compatible API base URL.
     :param api_key: Optional API key for the model provider.
+    :param no_think: Ask the provider to skip reasoning with
+        ``reasoning_effort="none"``.
     :return: Chat model whose ``invoke`` calls the remote API.
     """
     kwargs = {"model": model}
@@ -103,6 +106,10 @@ def build_openai_llm(
         kwargs["base_url"] = base_url
     if api_key:
         kwargs["api_key"] = api_key
+    if no_think:
+        # Ollama's OpenAI endpoint ignores its native think=false here, and a
+        # /no_think prompt prefix, but honors reasoning_effort="none".
+        kwargs["reasoning_effort"] = "none"
 
     # Optional connection settings are omitted so the client can use its defaults.
     logger.info("Initializing model %s%s", model, f" at {base_url}" if base_url else "")
@@ -242,6 +249,7 @@ def apply_prompt_to_csv(
     output_column: str = "applicator_output",
     local_model: Optional[LocalModelConfig] = None,
     batch_size: int = 1,
+    no_think: bool = False,
 ) -> None:
     """Apply a prompt-driven LLM transformation to a CSV column.
 
@@ -257,6 +265,8 @@ def apply_prompt_to_csv(
         of calling an API; ``model``, ``base_url`` and ``api_key`` are unused.
     :param batch_size: Rows processed together: generated as one batch on a
         local model, or sent as concurrent requests to an API.
+    :param no_think: Disable reasoning on the API path; a local model uses
+        ``LocalModelConfig.no_think`` instead.
     """
     # Validate the prompt before creating the client or opening the output file.
     logger.info("Loading prompt from %s", prompt_json)
@@ -266,7 +276,7 @@ def apply_prompt_to_csv(
     if local_model:
         llm = build_local_llm(local_model, batch_size=batch_size)
     else:
-        llm = build_openai_llm(model, base_url=base_url, api_key=api_key)
+        llm = build_openai_llm(model, base_url=base_url, api_key=api_key, no_think=no_think)
 
     logger.info("Processing column '%s' from %s (batch size %d)", column, input_csv, batch_size)
     read_csv(

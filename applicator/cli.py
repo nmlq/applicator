@@ -47,7 +47,6 @@ LOCAL_OPTIONS = {
     "top_k": "--top-k",
     "repetition_penalty": "--repetition-penalty",
     "trust_remote_code": "--trust-remote-code",
-    "no_think": "--no-think",
     "load_in_4bit": "--load-in-4bit",
 }
 
@@ -136,6 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="rows processed together: one GPU batch for a local model, "
         "concurrent requests for an API (default: 1)",
     )
+    run_parser.add_argument(
+        "--no-think",
+        action="store_true",
+        help="disable the thinking phase of reasoning models such as Qwen3: "
+        "a chat template switch for a local model, reasoning_effort=none for an API",
+    )
 
     # Local model options load a Hugging Face model in-process instead of calling an API.
     local = run_parser.add_argument_group(
@@ -189,12 +194,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow the model repository to run custom code",
     )
     local.add_argument(
-        "--no-think",
-        action="store_true",
-        default=None,
-        help="disable the thinking phase of reasoning models such as Qwen3",
-    )
-    local.add_argument(
         "--load-in-4bit",
         action="store_true",
         default=None,
@@ -222,7 +221,7 @@ def run(args: argparse.Namespace) -> None:
             for dest in LOCAL_OPTIONS
             if getattr(args, dest) is not None
         }
-        local_model = LocalModelConfig(model=args.local_model, **options)
+        local_model = LocalModelConfig(model=args.local_model, no_think=args.no_think, **options)
 
     apply_prompt_to_csv(
         input_csv=args.input_csv,
@@ -235,6 +234,7 @@ def run(args: argparse.Namespace) -> None:
         output_column=args.output_column,
         local_model=local_model,
         batch_size=args.batch_size,
+        no_think=args.no_think,
     )
 
 

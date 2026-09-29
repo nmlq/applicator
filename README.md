@@ -122,6 +122,7 @@ applicator run input.csv prompt.json \
 | `--api-key` | — | no | provider environment | API key |
 | `--output-column` | — | no | `applicator_output` | Name of the generated column |
 | `--batch-size` | — | no | `1` | Rows processed together; see [Batching](#batching) |
+| `--no-think` | — | no | off | Disable thinking in reasoning models; see [Reasoning models](#reasoning-models) |
 
 For an OpenAI-compatible local endpoint:
 
@@ -168,6 +169,31 @@ still accepts `--api-key` because `langchain-openai` expects an API key
 parameter; a placeholder such as `ollama` is sufficient for a local server.
 If Ollama is configured on another host, replace `localhost` with that host's
 address and ensure the server accepts connections from the client.
+
+For reasoning models such as `qwen3`, add `--no-think`. Thinking is otherwise
+on, and it is slow even though the thinking text does not appear in the
+output column (see [Reasoning models](#reasoning-models)).
+
+`--batch-size N` sends N requests at once. Ollama only processes them in
+parallel when it is started with `OLLAMA_NUM_PARALLEL` of at least N; each
+parallel slot reserves its own context memory, set with
+`OLLAMA_CONTEXT_LENGTH`. When Ollama runs as a systemd service, set these with
+`sudo systemctl edit ollama`:
+
+```ini
+[Service]
+Environment="OLLAMA_NUM_PARALLEL=4"
+Environment="OLLAMA_CONTEXT_LENGTH=4096"
+```
+
+Then run `sudo systemctl daemon-reload && sudo systemctl restart ollama`.
+Check with `ollama ps` that the model shows `100% GPU`; if the parallel slots
+do not fit in GPU memory, Ollama moves part of the model to the CPU.
+
+For quantized models on older NVIDIA GPUs such as the Tesla P40, Ollama is
+usually faster than a [local model](#local-models): its engine computes
+directly on quantized weights and handles long prompts efficiently on those
+GPUs.
 
 The CLI validates that the input CSV and prompt JSON files exist and are
 readable before processing.
@@ -218,7 +244,6 @@ combined with `--local-model`, and `--model` is ignored.
 | `--top-k` | model default | Top-k sampling cutoff (only with `--temperature`) |
 | `--repetition-penalty` | model default | Penalty for repeated tokens, for example `1.1` |
 | `--trust-remote-code` | off | Allow the model repository to run custom code |
-| `--no-think` | off | Disable the thinking phase of reasoning models such as Qwen3 |
 | `--load-in-4bit` | off | Quantize weights to 4-bit with `bitsandbytes`; `--dtype` sets the compute dtype |
 
 `--device auto` places the model on the best available device, but falls back
@@ -227,12 +252,26 @@ to the CPU silently when torch cannot use the GPU. Use `--device cuda` or
 
 ### Reasoning models
 
-Reasoning models such as Qwen3 think before answering by default. The thinking
-is written into the output column as a `<think>...</think>` block and counts
-against `--max-new-tokens`, which makes each row much slower. `--no-think`
-passes `enable_thinking=False` to the model's chat template, so the model
-answers directly. Models whose chat template has no thinking switch ignore
-the option.
+Reasoning models such as Qwen3 think before answering by default. Thinking
+can generate hundreds of tokens per row and makes each row much slower.
+`--no-think` turns it off:
+
+- With `--local-model`, it passes `enable_thinking=False` to the model's chat
+  template, so the model answers directly. Without it, the thinking is written
+  into the output column as a `<think>...</think>` block and counts against
+  `--max-new-tokens`. Models whose chat template has no thinking switch
+  ignore the option.
+- With an API, it sends `reasoning_effort="none"`. Ollama returns thinking
+  in a separate field that Applicator does not save, so without `--no-think`
+  the output column looks clean while each row still pays for the thinking.
+  Ollama 0.34 ignores both a `/no_think` prefix in the prompt and its native
+  `think: false` option on this endpoint; `reasoning_effort="none"` is the
+  setting it honors. Hosted providers may reject `"none"` for models that do
+  not support it.
+
+In testing with Qwen3 on Ollama, `--no-think` was 4.6 times faster for eight
+reports on Apple Silicon and 6.5 times faster for a single report on a Tesla
+P40.
 
 ### Choosing a model size
 
@@ -534,7 +573,8 @@ suite covers:
 - JSON prompt validation
 - CSV transformation and validation
 - LLM configuration and response conversion
-- Local model loading, generation settings, and the `--no-think` switch
+- Local model loading, generation settings, and the `--no-think` switch for
+  local models and APIs
 - CLI parsing, validation, and dispatch
 - End-to-end reader behavior using the example fixtures
 

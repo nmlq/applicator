@@ -93,6 +93,35 @@ def test_apply_prompt_to_csv_omits_optional_llm_arguments(monkeypatch, tmp_path)
     assert llm_kwargs == {"model": "test-model"}
 
 
+def test_apply_prompt_to_csv_disables_api_reasoning(monkeypatch, tmp_path):
+    """Verify ``no_think`` asks the API for ``reasoning_effort="none"``.
+
+    :param monkeypatch: Pytest monkeypatch fixture.
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    llm_kwargs = {}
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            """Record model construction arguments."""
+            llm_kwargs.update(kwargs)
+
+    monkeypatch.setattr(core, "ChatOpenAI", FakeLLM)
+    monkeypatch.setattr(core, "read_json", lambda path: "Echo {input}")
+    monkeypatch.setattr(core, "read_csv", lambda **kwargs: None)
+
+    core.apply_prompt_to_csv(
+        input_csv=tmp_path / "input.csv",
+        prompt_json=tmp_path / "prompt.json",
+        column="text",
+        output_csv=tmp_path / "output.csv",
+        model="qwen3:14b",
+        no_think=True,
+    )
+
+    assert llm_kwargs == {"model": "qwen3:14b", "reasoning_effort": "none"}
+
+
 def test_apply_prompt_to_csv_uses_local_model_when_configured(monkeypatch, tmp_path):
     """Verify a local model config bypasses the API client.
 
