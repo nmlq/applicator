@@ -208,6 +208,47 @@ GPUs.
 The CLI validates that the input CSV and prompt JSON files exist and are
 readable before processing.
 
+### Run several prompts with `run-local.sh`
+
+`run-local.sh` runs every prompt file in a directory against one or more
+columns of a CSV, using a local Ollama server. For each `*.json` file in
+`PROMPTS_DIR` and each column in `COLUMNS`, it calls `applicator run` with
+`--no-think` and writes the result next to the prompt as
+`<prompt>_<column>_output.csv`:
+
+```bash
+./run-local.sh
+```
+
+With the defaults, `prompts/summary.json` and the columns `ReportText` and
+`ImpressionText` produce `prompts/summary_ReportText_output.csv` and
+`prompts/summary_ImpressionText_output.csv`. The script stops at the first
+failed run, and exits with an error if `PROMPTS_DIR` contains no `.json`
+files.
+
+Override the defaults with environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VENV_DIR` | `venv` | Virtual environment to activate before running |
+| `INPUT_CSV` | `input.csv` | Source CSV file |
+| `PROMPTS_DIR` | `prompts` | Directory of prompt JSON files |
+| `COLUMNS` | `ReportText ImpressionText` | Space-separated input columns |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL |
+| `OLLAMA_MODEL` | `gemma3n:e2b` | Ollama model to use |
+| `OLLAMA_API_KEY` | `ollama` | Placeholder API key |
+| `BATCH_SIZE` | `4` | Value passed to `--batch-size` |
+
+For example, to use the `.venv` created in [Installation](#installation) and
+a different model and column:
+
+```bash
+VENV_DIR=.venv OLLAMA_MODEL=qwen3:14b COLUMNS=text ./run-local.sh
+```
+
+`input.csv` and `prompts/` are listed in `.gitignore`, so local data, prompts
+and their outputs are not committed.
+
 ## Local models
 
 Applicator can load a Hugging Face model into its own process and run it on
@@ -760,7 +801,8 @@ The fixture paths are exposed as the `example_input_csv` and
 ```text
 applicator/
 ├── .claude/
-│   └── CLAUDE.md    # Rules for Claude Code in this repository
+│   ├── CLAUDE.md    # Rules for Claude Code in this repository
+│   └── skills/      # Project skills for Claude Code
 ├── applicator/
 │   ├── cli.py       # argparse command-line interface
 │   ├── core.py      # API and local model setup, CSV processing
@@ -774,5 +816,6 @@ applicator/
 │   ├── test_core.py
 │   └── test_readers.py
 ├── requirements.txt # Runtime dependencies
+├── run-local.sh     # Run every prompt in prompts/ against Ollama
 └── setup.py         # Package metadata, console entry point, `local` extra
 ```
