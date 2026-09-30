@@ -36,3 +36,7 @@ pip-wheel-metadata/
 .DS_Store
 .idea/
 .vscode/
+
+# Local prompt files and their outputs
+prompts/
+input.csv
