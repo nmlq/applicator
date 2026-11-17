@@ -55,7 +55,7 @@ def test_read_csv_transforms_rows_and_preserves_columns(tmp_path, capsys):
     read_csv(
         input_csv=input_path,
         output_csv=output_path,
-        input_column="name",
+        input_columns="name",
         output_column="greeting",
         transform=lambda values: [f"Hello {value}" for value in values],
     )
@@ -99,6 +99,78 @@ def test_read_csv_rejects_unknown_input_column(tmp_path):
         read_csv(input_path, output_path, "missing", "result", str.upper)
 
 
+def test_read_csv_joins_multiple_columns_with_newline(tmp_path):
+    """Verify several input columns are joined per row, in order, by a newline.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text(
+        "id,ImpressionText,ReportText\n"
+        "1,No acute findings.,Brain MRI is normal.\n"
+        '2,,"Line one\nline two"\n',
+        encoding="utf-8",
+    )
+    batches = []
+
+    def transform(values):
+        """Record each batch and echo its values."""
+        batches.append(values)
+        return values
+
+    read_csv(
+        input_csv=input_path,
+        output_csv=output_path,
+        input_columns=["ReportText", "ImpressionText"],
+        output_column="result",
+        transform=transform,
+        batch_size=2,
+    )
+
+    expected = [
+        "Brain MRI is normal.\nNo acute findings.",
+        # An empty value still contributes its separator.
+        "Line one\nline two\n",
+    ]
+    assert batches == [expected]
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    # Source columns keep their original order and values.
+    assert list(rows[0]) == ["id", "ImpressionText", "ReportText", "result"]
+    assert [row["result"] for row in rows] == expected
+
+
+def test_read_csv_lists_every_missing_input_column(tmp_path):
+    """Verify all missing input columns are named in one error.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("name,age\nAda,36\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Columns 'first', 'last' not found"):
+        read_csv(input_path, output_path, ["name", "first", "last"], "result", str.upper)
+
+    assert not output_path.exists()
+
+
+def test_read_csv_rejects_empty_input_columns(tmp_path):
+    """Verify an empty column list is rejected.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("name\nAda\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="At least one input column"):
+        read_csv(input_path, output_path, [], "result", str.upper)
+
+
 def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
     """Verify processing using the shared example input files.
 
@@ -112,7 +184,7 @@ def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
     read_csv(
         input_csv=example_input_csv,
         output_csv=output_path,
-        input_column="text",
+        input_columns="text",
         output_column="result",
         transform=lambda values: [prompt.format(input=value) for value in values],
     )

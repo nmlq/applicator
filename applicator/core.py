@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 from langchain_openai import ChatOpenAI
 
@@ -68,7 +68,7 @@ def make_transform(llm, prompt_template: str) -> Callable[[List[str]], List[str]
 def apply_prompt_to_csv(
     input_csv: Path,
     prompt_json: Path,
-    column: str,
+    columns: Sequence[str],
     output_csv: Path,
     model: str,
     base_url: Optional[str] = None,
@@ -77,11 +77,12 @@ def apply_prompt_to_csv(
     batch_size: int = 1,
     no_think: bool = False,
 ) -> None:
-    """Apply a prompt-driven LLM transformation to a CSV column.
+    """Apply a prompt-driven LLM transformation to one or more CSV columns.
 
     :param input_csv: Source CSV file.
     :param prompt_json: JSON file containing the prompt template.
-    :param column: CSV column whose values are sent to the model.
+    :param columns: CSV columns whose values are sent to the model; several
+        columns are joined per row, in order, with a newline.
     :param output_csv: Destination CSV file.
     :param model: Model identifier passed to ``ChatOpenAI``.
     :param base_url: Optional OpenAI-compatible API base URL.
@@ -98,11 +99,16 @@ def apply_prompt_to_csv(
     # The model is created once and reused for every row.
     llm = build_openai_llm(model, base_url=base_url, api_key=api_key, no_think=no_think)
 
-    logger.info("Processing column '%s' from %s (batch size %d)", column, input_csv, batch_size)
+    logger.info(
+        "Processing column(s) %s from %s (batch size %d)",
+        ", ".join(f"'{column}'" for column in columns),
+        input_csv,
+        batch_size,
+    )
     read_csv(
         input_csv=input_csv,
         output_csv=output_csv,
-        input_column=column,
+        input_columns=columns,
         output_column=output_column,
         transform=make_transform(llm, prompt_template),
         batch_size=batch_size,
