@@ -55,7 +55,7 @@ def test_build_parser_parses_run_options(tmp_path):
     assert args.command == "run"
     assert args.input_csv == input_path
     assert args.prompt_json == prompt_path
-    assert args.column == "text"
+    assert args.columns == ["text"]
     assert args.output_csv.name == "output.csv"
     assert args.model == "test-model"
     assert args.base_url == "https://example.test/v1"
@@ -83,7 +83,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
     args = argparse.Namespace(
         input_csv=tmp_path / "input.csv",
         prompt_json=tmp_path / "prompt.json",
-        column="text",
+        columns=["ReportText", "ImpressionText"],
         output_csv=tmp_path / "output.csv",
         model="test-model",
         base_url=None,
@@ -97,7 +97,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
     assert calls == {
         "input_csv": args.input_csv,
         "prompt_json": args.prompt_json,
-        "column": "text",
+        "columns": ["ReportText", "ImpressionText"],
         "output_csv": args.output_csv,
         "model": "test-model",
         "base_url": None,
@@ -126,6 +126,48 @@ def test_main_dispatches_to_command_handler(monkeypatch):
     cli.main(["run"])
 
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "column_options",
+    [
+        ["--column", "ReportText", "ImpressionText"],
+        ["-c", "ReportText", "-c", "ImpressionText"],
+    ],
+)
+def test_build_parser_collects_multiple_columns_in_order(tmp_path, column_options):
+    """Verify several input columns are collected in command-line order.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param column_options: Column options in one of the supported forms.
+    """
+    input_path = tmp_path / "input.csv"
+    prompt_path = tmp_path / "prompt.json"
+    input_path.write_text("ReportText,ImpressionText\na,b\n", encoding="utf-8")
+    prompt_path.write_text('{"prompt": "Echo {input}"}', encoding="utf-8")
+
+    args = cli.build_parser().parse_args(
+        ["run", str(input_path), str(prompt_path), *column_options, "-o", "out.csv"]
+    )
+
+    assert args.columns == ["ReportText", "ImpressionText"]
+
+
+def test_main_requires_a_column(tmp_path, capsys):
+    """Verify ``--column`` is required and needs at least one name.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param capsys: Pytest output capture fixture.
+    """
+    input_path = tmp_path / "input.csv"
+    prompt_path = tmp_path / "prompt.json"
+    input_path.write_text("text\nhello\n", encoding="utf-8")
+    prompt_path.write_text('{"prompt": "Echo {input}"}', encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        cli.main(["run", str(input_path), str(prompt_path), "-o", "out.csv", "-c"])
+
+    assert "expected at least one argument" in capsys.readouterr().err
 
 
 def run_args(tmp_path, *options):

@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Sequence, Union
 
 import pandas
 from tqdm import tqdm
@@ -34,22 +34,34 @@ def read_json(path: Path) -> str:
 def read_csv(
     input_csv: Path,
     output_csv: Path,
-    input_column: str,
+    input_columns: Union[str, Sequence[str]],
     output_column: str,
     transform: Callable[[List[str]], List[str]],
     batch_size: int = 1,
 ) -> None:
-    """Transform one CSV column and write the results to another CSV file.
+    """Transform CSV column values and write the results to another CSV file.
+
+    When several input columns are given, each row's values are joined in the
+    given order with a newline, and the joined text is the transform input.
 
     :param input_csv: Source CSV file.
     :param output_csv: Destination CSV file.
-    :param input_column: Column whose values are transformed.
+    :param input_columns: Column, or ordered columns, whose values are
+        transformed.
     :param output_column: Column receiving transformed values.
     :param transform: Function mapping a batch of input values to one output
         value each, in the same order.
     :param batch_size: Number of rows passed to each ``transform`` call.
-    :raises ValueError: If the input has no header or the column is missing.
+    :raises ValueError: If the input has no header, no input column is given,
+        or an input column is missing.
     """
+    # A bare string is one column name, not a sequence of one-letter names.
+    if isinstance(input_columns, str):
+        input_columns = [input_columns]
+    input_columns = list(input_columns)
+    if not input_columns:
+        raise ValueError("At least one input column is required.")
+
     # Read only the header first so validation happens before any output exists.
     # dtype=str and keep_default_na=False keep values exactly as written.
     read_options = dict(encoding="utf-8-sig", dtype=str, keep_default_na=False)
@@ -59,9 +71,12 @@ def read_csv(
         raise ValueError("Input CSV has no header.") from None
 
     fieldnames = list(header.columns)
-    if input_column not in fieldnames:
+    missing = [column for column in input_columns if column not in fieldnames]
+    if missing:
+        names = ", ".join(f"'{column}'" for column in missing)
+        noun = "Column" if len(missing) == 1 else "Columns"
         raise ValueError(
-            f"Column '{input_column}' not found. "
+            f"{noun} {names} not found. "
             f"Available columns: {', '.join(fieldnames)}"
         )
 
@@ -80,7 +95,9 @@ def read_csv(
             chunks = pandas.read_csv(input_csv, chunksize=batch_size, **read_options)
             with tqdm(desc="Processing rows", unit="row") as progress:
                 for chunk_df in chunks:
-                    chunk_df[output_column] = transform(chunk_df[input_column].tolist())
+                    # Join the row's input values in column order, one per line.
+                    values = chunk_df[input_columns].agg("\n".join, axis=1).tolist()
+                    chunk_df[output_column] = transform(values)
                     chunk_df.to_csv(dst, columns=fieldnames, header=False, index=False)
                     # Flush each batch so completed work remains available immediately.
                     dst.flush()

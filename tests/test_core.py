@@ -41,7 +41,7 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
     core.apply_prompt_to_csv(
         input_csv=tmp_path / "input.csv",
         prompt_json=tmp_path / "prompt.json",
-        column="name",
+        columns=["name"],
         output_csv=tmp_path / "output.csv",
         model="test-model",
         base_url="https://example.test/v1",
@@ -56,7 +56,7 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
         "api_key": "test-key",
     }
     assert calls == [["Summarize Ada", "Summarize Grace"]]
-    assert captured["input_column"] == "name"
+    assert captured["input_columns"] == ["name"]
     assert captured["output_column"] == "summary"
     assert captured["batch_size"] == 2
     assert captured["results"] == ["Summary", "['non-string', 'content']"]
@@ -82,7 +82,7 @@ def test_apply_prompt_to_csv_omits_optional_llm_arguments(monkeypatch, tmp_path)
     core.apply_prompt_to_csv(
         input_csv=tmp_path / "input.csv",
         prompt_json=tmp_path / "prompt.json",
-        column="text",
+        columns=["text"],
         output_csv=tmp_path / "output.csv",
         model="test-model",
     )
@@ -110,10 +110,33 @@ def test_apply_prompt_to_csv_disables_api_reasoning(monkeypatch, tmp_path):
     core.apply_prompt_to_csv(
         input_csv=tmp_path / "input.csv",
         prompt_json=tmp_path / "prompt.json",
-        column="text",
+        columns=["text"],
         output_csv=tmp_path / "output.csv",
         model="qwen3:14b",
         no_think=True,
     )
 
     assert llm_kwargs == {"model": "qwen3:14b", "reasoning_effort": "none"}
+
+
+def test_apply_prompt_to_csv_passes_multiple_columns_in_order(monkeypatch, tmp_path):
+    """Verify several input columns reach the CSV reader in the given order.
+
+    :param monkeypatch: Pytest monkeypatch fixture.
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    captured = {}
+
+    monkeypatch.setattr(core, "ChatOpenAI", lambda **kwargs: None)
+    monkeypatch.setattr(core, "read_json", lambda path: "Echo {input}")
+    monkeypatch.setattr(core, "read_csv", lambda **kwargs: captured.update(kwargs))
+
+    core.apply_prompt_to_csv(
+        input_csv=tmp_path / "input.csv",
+        prompt_json=tmp_path / "prompt.json",
+        columns=["ReportText", "ImpressionText"],
+        output_csv=tmp_path / "output.csv",
+        model="test-model",
+    )
+
+    assert captured["input_columns"] == ["ReportText", "ImpressionText"]

@@ -43,15 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="applicator",
-        description="Apply an LLM prompt to one CSV column, one row at a time.",
+        description="Apply an LLM prompt to one or more CSV columns, one row at a time.",
     )
     # A subcommand keeps room for additional CLI operations in the future.
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser(
         "run",
-        help="apply a prompt to a CSV column",
-        description="Apply an LLM prompt to one CSV column, one row at a time.",
+        help="apply a prompt to one or more CSV columns",
+        description="Apply an LLM prompt to one or more CSV columns, one row at a time.",
     )
     run_parser.add_argument(
         "input_csv",
@@ -67,7 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--column",
         "-c",
         required=True,
-        help="CSV column to process",
+        dest="columns",
+        nargs="+",
+        action="extend",
+        metavar="COLUMN",
+        help="CSV column to process; give several (e.g. -c A B, or -c A -c B) "
+        "to join each row's values in that order with a newline",
     )
     run_parser.add_argument(
         "--output",
@@ -125,7 +130,7 @@ def run(args: argparse.Namespace) -> None:
     apply_prompt_to_csv(
         input_csv=args.input_csv,
         prompt_json=args.prompt_json,
-        column=args.column,
+        columns=args.columns,
         output_csv=args.output_csv,
         model=args.model,
         base_url=args.base_url,

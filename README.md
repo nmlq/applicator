@@ -1,7 +1,8 @@
 # Applicator
 
-Applicator is a small Python CLI that applies an LLM prompt to every value in
-one CSV column and writes each result into a new CSV column. It calls an
+Applicator is a small Python CLI that applies an LLM prompt to every row of
+a CSV, using the text of one or more columns, and writes each result into a
+new CSV column. It calls an
 OpenAI-compatible API endpoint, such as OpenAI or a local Ollama server, and
 can send rows in concurrent batches.
 
@@ -75,7 +76,8 @@ prompt must include the `{input}` placeholder:
 ```
 
 The placeholder is replaced with the value from the selected CSV column for
-each row.
+each row. When several columns are selected, it is replaced with their values
+joined by a newline (see [Multiple input columns](#multiple-input-columns)).
 
 ## Command-line usage
 
@@ -83,7 +85,7 @@ The CLI exposes a `run` subcommand:
 
 ```bash
 applicator run INPUT_CSV PROMPT_JSON \
-  --column COLUMN \
+  --column COLUMN [COLUMN ...] \
   --output OUTPUT_CSV
 ```
 
@@ -102,7 +104,7 @@ applicator run input.csv prompt.json \
 | --- | --- | --- | --- | --- |
 | `INPUT_CSV` | — | yes | — | Readable source CSV file |
 | `PROMPT_JSON` | — | yes | — | Readable prompt JSON file |
-| `--column` | `-c` | yes | — | Input CSV column to process |
+| `--column` | `-c` | yes | — | Input CSV column(s) to process; see [Multiple input columns](#multiple-input-columns) |
 | `--output` | `-o` | yes | — | Destination CSV file |
 | `--model` | `-m` | no | `gpt-4.1-mini` | Model identifier |
 | `--base-url` | — | no | provider default | OpenAI-compatible API base URL |
@@ -110,6 +112,43 @@ applicator run input.csv prompt.json \
 | `--output-column` | — | no | `applicator_output` | Name of the generated column |
 | `--batch-size` | — | no | `1` | Rows processed together; see [Batching](#batching) |
 | `--no-think` | — | no | off | Disable thinking in reasoning models; see [Reasoning models](#reasoning-models) |
+
+### Multiple input columns
+
+Pass more than one column name to `--column` to send several columns of each
+row in one prompt. Applicator joins the row's values in the order given, with
+a newline between them, and substitutes the result for `{input}`. Both forms
+below are equivalent:
+
+```bash
+applicator run input.csv prompt.json \
+  --column ReportText ImpressionText \
+  --output output.csv
+
+applicator run input.csv prompt.json \
+  -c ReportText -c ImpressionText \
+  --output output.csv
+```
+
+For a row where `ReportText` is `Brain MRI is normal.` and `ImpressionText` is
+`No acute findings.`, the prompt receives:
+
+```text
+Brain MRI is normal.
+No acute findings.
+```
+
+This matches the pandas expression
+`df[['ReportText', 'ImpressionText']].agg('\n'.join, axis=1)`. The joined text
+contains no column names or other labels; add any wording the model needs to
+the prompt itself. An empty value still contributes its newline, so a row with
+an empty `ImpressionText` ends with a trailing newline. Every named column must
+exist in the CSV header, and the error lists all missing names. The original
+columns are written to the output unchanged.
+
+`--column COLUMN [COLUMN ...]` takes every following word until the next
+option, so put the input CSV and prompt JSON before it, or follow it with
+another option such as `--output`.
 
 For an OpenAI-compatible local endpoint:
 
@@ -402,7 +441,9 @@ to produce live results.
 - Adds the generated response to `applicator_output` by default.
 - Writes and flushes each completed batch immediately.
 - Prints progress for each processed row.
-- Raises an error when the input CSV has no header or the requested column is
+- Joins the values of multiple `--column` columns per row, in order, with a
+  newline.
+- Raises an error when the input CSV has no header or a requested column is
   missing.
 - Does not implement agents or MCP.
 
@@ -418,10 +459,11 @@ The tests mock the LLM client, so they do not make network requests or
 require an API key. The suite covers:
 
 - JSON prompt validation
-- CSV transformation and validation, including batched processing
+- CSV transformation and validation, including batched processing and
+  joining multiple input columns
 - LLM configuration and response conversion
 - The `--no-think` switch
-- CLI parsing, validation, and dispatch
+- CLI parsing, validation, and dispatch, including both multiple-column forms
 - End-to-end reader behavior using the example fixtures
 
 ## Test fixtures
