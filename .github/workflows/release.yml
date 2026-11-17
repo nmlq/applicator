@@ -9,13 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Validate semantic version tag
         run: |
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -23,28 +19,80 @@ jobs:
             exit 1
           fi
 
+  # shiv bundles compiled wheels (e.g. pydantic_core) for the OS, CPU and
+  # Python version it is built on, so each combination needs its own asset.
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest, name: linux-x86_64 }
+          - { runner: ubuntu-24.04-arm, name: linux-aarch64 }
+          - { runner: macos-latest, name: macos-arm64 }
+          - { runner: macos-15-intel, name: macos-x86_64 }
+          # Windows ignores shebangs; the .pyz extension lets the Python
+          # launcher (py.exe) run the archive with the pinned version.
+          - { runner: windows-latest, name: windows-x86_64, ext: .pyz }
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.platform.runner }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Build shiv executable
+        env:
+          PY: ${{ matrix.python-version }}
+          PLATFORM: ${{ matrix.platform.name }}
+          EXT: ${{ matrix.platform.ext }}
         run: |
           python -m pip install --upgrade pip shiv
-          mkdir --parents dist
+          mkdir -p dist
+          asset="applicator-${GITHUB_REF_NAME}-${PLATFORM}-py${PY//./}${EXT}"
+          # Pin the shebang to the matching interpreter so the bundled
+          # compiled extensions are always loaded by a compatible Python.
           shiv \
             --compressed \
+            --python "/usr/bin/env python${PY}" \
             --console-script applicator \
-            --output-file "dist/applicator-${GITHUB_REF_NAME}" \
+            --output-file "dist/${asset}" \
             .
-          chmod +x "dist/applicator-${GITHUB_REF_NAME}"
+          chmod +x "dist/${asset}"
+          # Run through the interpreter so the check also works on Windows.
+          python "dist/${asset}" --help > /dev/null
+          echo "ASSET=${asset}" >> "$GITHUB_ENV"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: dist/${{ env.ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/applicator-${GITHUB_REF_NAME}" \
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --generate-notes \
             --title "Applicator ${GITHUB_REF_NAME}"
