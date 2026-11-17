@@ -22,7 +22,7 @@ def read_requirements() -> list[str]:
 
 setup(
     name="applicator",
-    version="0.5.0",
+    version="0.6.0",
     description="Apply an LLM prompt to a CSV column row-by-row.",
     packages=find_packages(include=["applicator", "applicator.*"]),
     python_requires=">=3.9",

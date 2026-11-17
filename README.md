@@ -240,6 +240,28 @@ applicator run input.csv prompt.json \
   --api-key "$OLLAMA_API_KEY"
 ```
 
+A complete example with a released executable, processing the first 10 rows
+of two columns with `medgemma:4b`:
+
+```bash
+ollama pull medgemma:4b
+curl http://localhost:11434/v1/models   # check the server is up and lists the model
+
+./applicator-v0.6.0-linux-x86_64-py311 run input.csv prompt.json \
+  --column ReportText ImpressionText \
+  --output output.csv \
+  --model medgemma:4b \
+  --base-url http://localhost:11434/v1 \
+  --api-key ollama \
+  --limit 10
+```
+
+Without `--base-url`, Applicator connects to OpenAI instead; if
+`OPENAI_API_KEY` is also unset, it fails with
+`openai.OpenAIError: Missing credentials`. Put the input files
+before `--column`, or follow the column names with another option, because
+`--column` takes every following argument that does not start with `--`.
+
 The local Ollama API does not normally require authentication. Applicator
 still accepts `--api-key` because `langchain-openai` expects an API key
 parameter; a placeholder such as `ollama` is sufficient for a local server.

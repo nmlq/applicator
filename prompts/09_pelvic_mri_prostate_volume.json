@@ -1,0 +1,3 @@
+{
+  "prompt": "Using prostate MRI reports, please extract the prostate volume. If the volume is reported directly (e.g. 55cc or 25 mL), report that number directly. If the volume is only reported as prostate dimension (e.g. 5.1 x 4.3 x 4.1 cm), report the dimensions. If both the volume and dimensions are reported, report the volume only. If the prostate volume or dimensions are not reported, or if the MRI report is not available, respond \"N/A\".\n{input}"
+}
