@@ -143,8 +143,12 @@ This matches the pandas expression
 contains no column names or other labels; add any wording the model needs to
 the prompt itself. An empty value still contributes its newline, so a row with
 an empty `ImpressionText` ends with a trailing newline. Every named column must
-exist in the CSV header, and the error lists all missing names. The original
-columns are written to the output unchanged.
+exist in the CSV header, and the error lists all missing names.
+
+The input columns are not written to the output CSV. For example, running with
+`--column ReportText ImpressionText` produces an output without `ReportText`
+or `ImpressionText`; every other column is kept unchanged, in its original
+order, followed by the output column.
 
 `--column COLUMN [COLUMN ...]` takes every following word until the next
 option, so put the input CSV and prompt JSON before it, or follow it with

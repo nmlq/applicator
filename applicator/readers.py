@@ -43,6 +43,8 @@ def read_csv(
 
     When several input columns are given, each row's values are joined in the
     given order with a newline, and the joined text is the transform input.
+    The input columns are not written to the output; all other source columns
+    are kept, in their original order, followed by the output column.
 
     :param input_csv: Source CSV file.
     :param output_csv: Destination CSV file.
@@ -80,6 +82,9 @@ def read_csv(
             f"Available columns: {', '.join(fieldnames)}"
         )
 
+    # The input columns are consumed by the transform, so they are left out of
+    # the output; every other source column is kept in its original order.
+    fieldnames = [column for column in fieldnames if column not in input_columns]
     if output_column not in fieldnames:
         fieldnames.append(output_column)
 

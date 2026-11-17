@@ -42,8 +42,8 @@ def test_read_json_rejects_invalid_prompt(payload, expected_message, tmp_path):
         read_json(prompt_path)
 
 
-def test_read_csv_transforms_rows_and_preserves_columns(tmp_path, capsys):
-    """Verify row transformation, column preservation, and progress output.
+def test_read_csv_transforms_rows_and_drops_input_column(tmp_path, capsys):
+    """Verify row transformation, input-column removal, and progress output.
 
     :param tmp_path: Pytest-provided temporary directory.
     :param capsys: Pytest output-capture fixture.
@@ -64,8 +64,8 @@ def test_read_csv_transforms_rows_and_preserves_columns(tmp_path, capsys):
         rows = list(csv.DictReader(file))
 
     assert rows == [
-        {"name": "Ada", "age": "36", "greeting": "Hello Ada"},
-        {"name": "Grace", "age": "28", "greeting": "Hello Grace"},
+        {"age": "36", "greeting": "Hello Ada"},
+        {"age": "28", "greeting": "Hello Grace"},
     ]
     # Progress goes to stderr via tqdm, leaving stdout clean.
     captured = capsys.readouterr()
@@ -138,8 +138,8 @@ def test_read_csv_joins_multiple_columns_with_newline(tmp_path):
     with output_path.open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
 
-    # Source columns keep their original order and values.
-    assert list(rows[0]) == ["id", "ImpressionText", "ReportText", "result"]
+    # Input columns are dropped; the rest keep their original order.
+    assert list(rows[0]) == ["id", "result"]
     assert [row["result"] for row in rows] == expected
 
 
@@ -195,7 +195,6 @@ def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
     assert rows == [
         {
             "id": "1",
-            "text": "The first example row.",
             "result": (
                 "Analyze the following input and return a concise result:\n\n"
                 "The first example row."
@@ -203,7 +202,6 @@ def test_read_example_files(example_input_csv, example_prompt_json, tmp_path):
         },
         {
             "id": "2",
-            "text": "The second example row.",
             "result": (
                 "Analyze the following input and return a concise result:\n\n"
                 "The second example row."
@@ -234,3 +232,29 @@ def test_read_csv_passes_rows_in_batches(tmp_path):
 
     assert batches == [["Ada", "Grace"], ["Linus"]]
     assert [row["result"] for row in rows] == ["ADA", "GRACE", "LINUS"]
+
+
+def test_read_csv_keeps_non_input_columns_in_order(tmp_path):
+    """Verify only the input columns are removed and the rest keep their order.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text(
+        "ReportText,id,ImpressionText,site\nA,1,B,north\n",
+        encoding="utf-8",
+    )
+
+    read_csv(
+        input_path,
+        output_path,
+        ["ReportText", "ImpressionText"],
+        "result",
+        lambda values: [value.upper() for value in values],
+    )
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert rows == [{"id": "1", "site": "north", "result": "A\nB"}]
