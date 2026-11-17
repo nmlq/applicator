@@ -89,7 +89,6 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         base_url=None,
         api_key=None,
         output_column="result",
-        local_model=None,
         batch_size=4,
         no_think=True,
     )
@@ -104,7 +103,6 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         "base_url": None,
         "api_key": None,
         "output_column": "result",
-        "local_model": None,
         "batch_size": 4,
         "no_think": True,
     }
@@ -144,89 +142,15 @@ def run_args(tmp_path, *options):
     return ["run", str(input_path), str(prompt_path), "-c", "text", "-o", "out.csv", *options]
 
 
-def test_run_builds_local_model_config(monkeypatch, tmp_path):
-    """Verify local model options reach the core as a ``LocalModelConfig``.
-
-    :param monkeypatch: Pytest monkeypatch fixture.
-    :param tmp_path: Pytest-provided temporary directory.
-    """
-    calls = {}
-
-    import applicator.core as core
-
-    monkeypatch.setattr(core, "apply_prompt_to_csv", lambda **kwargs: calls.update(kwargs))
-
-    cli.main(
-        run_args(
-            tmp_path,
-            "--local-model",
-            "org/model",
-            "--device",
-            "cuda:1",
-            "--dtype",
-            "bfloat16",
-            "--max-new-tokens",
-            "64",
-            "--temperature",
-            "0.7",
-            "--top-p",
-            "0.9",
-            "--top-k",
-            "40",
-            "--repetition-penalty",
-            "1.1",
-            "--trust-remote-code",
-            "--no-think",
-            "--load-in-4bit",
-        )
-    )
-
-    assert calls["local_model"] == core.LocalModelConfig(
-        model="org/model",
-        device="cuda:1",
-        dtype="bfloat16",
-        max_new_tokens=64,
-        temperature=0.7,
-        top_p=0.9,
-        top_k=40,
-        repetition_penalty=1.1,
-        trust_remote_code=True,
-        no_think=True,
-        load_in_4bit=True,
-    )
-
-
-def test_run_uses_local_model_defaults(monkeypatch, tmp_path):
-    """Verify unset local options fall back to ``LocalModelConfig`` defaults.
-
-    :param monkeypatch: Pytest monkeypatch fixture.
-    :param tmp_path: Pytest-provided temporary directory.
-    """
-    calls = {}
-
-    import applicator.core as core
-
-    monkeypatch.setattr(core, "apply_prompt_to_csv", lambda **kwargs: calls.update(kwargs))
-
-    cli.main(run_args(tmp_path, "--local-model", "org/model"))
-
-    assert calls["local_model"] == core.LocalModelConfig(model="org/model")
-
-
 @pytest.mark.parametrize(
     "options, message",
     [
-        (["--local-model", "m", "--base-url", "http://x"], "--base-url cannot be used with --local-model"),
-        (["--local-model", "m", "--api-key", "k"], "--api-key cannot be used with --local-model"),
-        (["--temperature", "0.5"], "--temperature requires --local-model"),
-        (["--trust-remote-code"], "--trust-remote-code requires --local-model"),
-        (["--load-in-4bit"], "--load-in-4bit requires --local-model"),
-        (["--local-model", "m", "--max-new-tokens", "0"], "must be at least 1"),
         (["--batch-size", "0"], "must be at least 1"),
+        (["--batch-size", "two"], "not an integer"),
     ],
 )
-def test_main_rejects_invalid_local_options(tmp_path, capsys, options, message):
-    """Verify local and API options cannot be mixed.
+def test_main_rejects_invalid_options(tmp_path, capsys, options, message):
+    """Verify invalid ``run`` options are rejected as usage errors.
 
     :param tmp_path: Pytest-provided temporary directory.
     :param capsys: Pytest output capture fixture.
