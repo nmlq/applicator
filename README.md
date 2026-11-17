@@ -33,17 +33,42 @@ pip install pytest
 
 ### Install a released shiv package
 
-Each tag matching `vX.Y.Z` creates a GitHub release containing a standalone
-executable. Download the asset for the release you want, install it on your
-`PATH`, and make it executable:
+Each tag matching `vX.Y.Z` creates a GitHub release containing standalone
+executables. Because they bundle compiled dependencies (such as
+`pydantic_core`), there is one asset per platform and Python version:
+
+```
+applicator-vX.Y.Z-<platform>-py<version>
+```
+
+where `<platform>` is `linux-x86_64`, `linux-aarch64`, `macos-arm64`
+(Apple Silicon), `macos-x86_64` (Intel) or `windows-x86_64`, and `<version>`
+is `311`, `312` or `313`. Windows assets end in `.pyz`. Each asset runs with the matching
+`pythonX.Y` found on your `PATH`, so that interpreter must be installed. Using
+an asset built for another platform or Python version fails at import time
+with errors like `cannot import name 'ArgsKwargs' from
+'pydantic_core._pydantic_core' (unknown location)`.
+
+Download the matching asset, install it on your `PATH`, and make it
+executable:
 
 ```bash
 VERSION="vX.Y.Z"
+PLATFORM="macos-arm64"   # or macos-x86_64, linux-x86_64, linux-aarch64
+PY="312"                 # 311, 312 or 313; requires python3.12 on PATH
 mkdir -p "$HOME/.local/bin"
 curl --fail --location \
   --output "$HOME/.local/bin/applicator" \
-  "https://github.com/nmlq/applicator/releases/download/${VERSION}/applicator-${VERSION}"
+  "https://github.com/nmlq/applicator/releases/download/${VERSION}/applicator-${VERSION}-${PLATFORM}-py${PY}"
 chmod +x "$HOME/.local/bin/applicator"
+```
+
+On Windows, download `applicator-vX.Y.Z-windows-x86_64-py312.pyz` (or the
+`py311`/`py313` asset) and run it through the Python launcher, which reads
+the pinned version from the file:
+
+```powershell
+py applicator-vX.Y.Z-windows-x86_64-py312.pyz --help
 ```
 
 The shiv package bootstraps its Python dependencies on first run, so after
