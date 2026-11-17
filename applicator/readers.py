@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Callable, List, Sequence, Union
+from typing import Callable, List, Optional, Sequence, Union
 
 import pandas
 from tqdm import tqdm
@@ -38,6 +38,7 @@ def read_csv(
     output_column: str,
     transform: Callable[[List[str]], List[str]],
     batch_size: int = 1,
+    limit: Optional[int] = None,
 ) -> None:
     """Transform CSV column values and write the results to another CSV file.
 
@@ -54,6 +55,7 @@ def read_csv(
     :param transform: Function mapping a batch of input values to one output
         value each, in the same order.
     :param batch_size: Number of rows passed to each ``transform`` call.
+    :param limit: Maximum number of data rows to read; ``None`` reads all rows.
     :raises ValueError: If the input has no header, no input column is given,
         or an input column is missing.
     """
@@ -96,9 +98,12 @@ def read_csv(
         # Route log records through tqdm so they don't garble the progress bar.
         with logging_redirect_tqdm():
             # chunksize buffers one batch of rows at a time instead of the whole file.
-            # No total: counting rows would mean reading the file twice.
-            chunks = pandas.read_csv(input_csv, chunksize=batch_size, **read_options)
-            with tqdm(desc="Processing rows", unit="row") as progress:
+            # nrows stops reading after the limit; None reads every row.
+            # No total without a limit: counting rows would mean reading the file twice.
+            chunks = pandas.read_csv(
+                input_csv, chunksize=batch_size, nrows=limit, **read_options
+            )
+            with tqdm(desc="Processing rows", unit="row", total=limit) as progress:
                 for chunk_df in chunks:
                     # Join the row's input values in column order, one per line.
                     values = chunk_df[input_columns].agg("\n".join, axis=1).tolist()

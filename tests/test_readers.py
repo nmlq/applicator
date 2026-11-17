@@ -234,6 +234,44 @@ def test_read_csv_passes_rows_in_batches(tmp_path):
     assert [row["result"] for row in rows] == ["ADA", "GRACE", "LINUS"]
 
 
+@pytest.mark.parametrize(
+    "limit, expected_batches",
+    [
+        (1, [["Ada"]]),
+        (3, [["Ada", "Grace"], ["Linus"]]),
+        (10, [["Ada", "Grace"], ["Linus", "Barbara"]]),
+        (None, [["Ada", "Grace"], ["Linus", "Barbara"]]),
+    ],
+)
+def test_read_csv_limits_rows(tmp_path, limit, expected_batches):
+    """Verify ``limit`` caps the rows read, across batch boundaries.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param limit: Maximum number of rows to read.
+    :param expected_batches: Batches the transform should receive.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("name\nAda\nGrace\nLinus\nBarbara\n", encoding="utf-8")
+    batches = []
+
+    def transform(values):
+        """Record each batch and upper-case its values."""
+        batches.append(values)
+        return [value.upper() for value in values]
+
+    read_csv(
+        input_path, output_path, "name", "result", transform, batch_size=2, limit=limit
+    )
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert batches == expected_batches
+    expected = [value.upper() for batch in expected_batches for value in batch]
+    assert [row["result"] for row in rows] == expected
+
+
 def test_read_csv_keeps_non_input_columns_in_order(tmp_path):
     """Verify only the input columns are removed and the rest keep their order.
 

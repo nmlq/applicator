@@ -108,6 +108,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="rows sent to the API as concurrent requests (default: 1)",
     )
     run_parser.add_argument(
+        "--limit",
+        type=positive_int,
+        metavar="N",
+        help="process at most the first N data rows, for debugging and "
+        "testing (default: all rows)",
+    )
+    run_parser.add_argument(
         "--no-think",
         action="store_true",
         help="disable the thinking phase of reasoning models such as Qwen3 "
@@ -138,6 +145,7 @@ def run(args: argparse.Namespace) -> None:
         output_column=args.output_column,
         batch_size=args.batch_size,
         no_think=args.no_think,
+        limit=args.limit,
     )
 
 
