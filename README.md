@@ -111,6 +111,7 @@ applicator run input.csv prompt.json \
 | `--api-key` | — | no | provider environment | API key |
 | `--output-column` | — | no | `applicator_output` | Name of the generated column |
 | `--batch-size` | — | no | `1` | Rows processed together; see [Batching](#batching) |
+| `--limit` | — | no | all rows | Process at most the first N data rows; see [Limiting rows](#limiting-rows) |
 | `--no-think` | — | no | off | Disable thinking in reasoning models; see [Reasoning models](#reasoning-models) |
 
 ### Multiple input columns
@@ -153,6 +154,26 @@ order, followed by the output column.
 `--column COLUMN [COLUMN ...]` takes every following word until the next
 option, so put the input CSV and prompt JSON before it, or follow it with
 another option such as `--output`.
+
+### Limiting rows
+
+`--limit N` processes only the first N data rows of the input CSV, which is
+useful for debugging a prompt or testing a model on a large file without
+paying for every row. The header row is not counted, and N must be a positive
+integer.
+
+```bash
+applicator run input.csv prompt.json \
+  --column text \
+  --output sample.csv \
+  --limit 10
+```
+
+The output CSV contains only the processed rows. Reading stops once the limit
+is reached, so the rest of the file is never loaded. A limit larger than the
+number of rows processes the whole file. `--limit` works with
+`--batch-size`; the last batch is shortened if needed so that no more than N
+rows are sent.
 
 For an OpenAI-compatible local endpoint:
 
@@ -441,6 +462,7 @@ to produce live results.
   file into memory.
 - Sends rows to the API in batches of `--batch-size` rows (default 1); the
   requests in a batch are sent concurrently.
+- Stops after the first `--limit` rows when a limit is given.
 - Preserves all original CSV columns.
 - Adds the generated response to `applicator_output` by default.
 - Writes and flushes each completed batch immediately.
@@ -463,11 +485,12 @@ The tests mock the LLM client, so they do not make network requests or
 require an API key. The suite covers:
 
 - JSON prompt validation
-- CSV transformation and validation, including batched processing and
-  joining multiple input columns
+- CSV transformation and validation, including batched processing,
+  joining multiple input columns, and row limits
 - LLM configuration and response conversion
 - The `--no-think` switch
 - CLI parsing, validation, and dispatch, including both multiple-column forms
+  and `--limit` validation
 - End-to-end reader behavior using the example fixtures
 
 ## Test fixtures

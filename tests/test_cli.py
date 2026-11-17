@@ -62,6 +62,17 @@ def test_build_parser_parses_run_options(tmp_path):
     assert args.api_key == "test-key"
     assert args.output_column == "result"
     assert args.batch_size == 1
+    assert args.limit is None
+
+
+def test_build_parser_parses_limit(tmp_path):
+    """Verify ``--limit`` is parsed as an integer.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    args = cli.build_parser().parse_args(run_args(tmp_path, "--limit", "5"))
+
+    assert args.limit == 5
 
 
 def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
@@ -91,6 +102,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         output_column="result",
         batch_size=4,
         no_think=True,
+        limit=10,
     )
     cli.run(args)
 
@@ -105,6 +117,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         "output_column": "result",
         "batch_size": 4,
         "no_think": True,
+        "limit": 10,
     }
 
 
@@ -189,6 +202,9 @@ def run_args(tmp_path, *options):
     [
         (["--batch-size", "0"], "must be at least 1"),
         (["--batch-size", "two"], "not an integer"),
+        (["--limit", "0"], "must be at least 1"),
+        (["--limit", "-3"], "must be at least 1"),
+        (["--limit", "ten"], "not an integer"),
     ],
 )
 def test_main_rejects_invalid_options(tmp_path, capsys, options, message):
