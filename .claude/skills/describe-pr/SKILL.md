@@ -20,8 +20,7 @@ shows the code, so the description only says what changed in behaviour.
 - Base every claim on the diff, not on commit messages or the conversation.
 - Run `venv/bin/python -m pytest -q` and note the pass count and Python
   version. If `venv/` is missing or broken, make a scratch virtualenv in the
-  scratchpad and run `pip install -e . pytest` in it. The tests don't need
-  the `local` extra, so don't install torch for them.
+  scratchpad and run `pip install -e . pytest` in it.
 
 ## Write
 
@@ -42,14 +41,13 @@ shows the code, so the description only says what changed in behaviour.
 
 - Each bullet is one line about behaviour: what now happens differently.
   Examples: "`applicator run` now sends rows to the model in batches of
-  `--batch-size`", or "adds `--load-in-4bit` to load local Hugging Face
-  models with 4-bit quantization".
+  `--batch-size`", or "`--no-think` now sends `reasoning_effort=none` to
+  the API".
 - Don't explain how the code works, and don't list docstring edits, helper
   renames, or new test names. The diff shows those.
 - Keep it to about 3–6 bullets. Put README, `setup.py`, `requirements.txt`
   or script changes in a single bullet if they matter at all. Do mention a
-  new or changed install step, such as a new dependency or a change to the
-  `local` extra.
+  new or changed install step, such as a new dependency.
 - Leave out the Breaking section unless one of these changed: a CLI
   subcommand, positional argument, flag name or default; the prompt JSON
   format; the output CSV's columns or values; or the name or parameters of a
