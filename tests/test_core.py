@@ -49,6 +49,7 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
         output_column="summary",
         batch_size=2,
         limit=3,
+        drop_columns=["site"],
     )
 
     assert llm_kwargs == {
@@ -61,6 +62,7 @@ def test_apply_prompt_to_csv_builds_llm_and_transforms_rows(monkeypatch, tmp_pat
     assert captured["output_column"] == "summary"
     assert captured["batch_size"] == 2
     assert captured["limit"] == 3
+    assert captured["drop_columns"] == ["site"]
     assert captured["results"] == ["Summary", "['non-string', 'content']"]
 
 

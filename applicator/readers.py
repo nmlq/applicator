@@ -31,6 +31,26 @@ def read_json(path: Path) -> str:
     return prompt
 
 
+def _require_columns(columns: Sequence[str], fieldnames: Sequence[str], label: str) -> None:
+    """Raise an error naming every column missing from the CSV header.
+
+    :param columns: Column names that must exist.
+    :param fieldnames: Column names in the CSV header.
+    :param label: Prefix for the error message, such as ``"Drop "``.
+    :raises ValueError: If any of ``columns`` is not in ``fieldnames``.
+    """
+    missing = [column for column in columns if column not in fieldnames]
+    if missing:
+        names = ", ".join(f"'{column}'" for column in missing)
+        noun = "column" if len(missing) == 1 else "columns"
+        if not label:
+            noun = noun.capitalize()
+        raise ValueError(
+            f"{label}{noun} {names} not found. "
+            f"Available columns: {', '.join(fieldnames)}"
+        )
+
+
 def read_csv(
     input_csv: Path,
     output_csv: Path,
@@ -39,13 +59,15 @@ def read_csv(
     transform: Callable[[List[str]], List[str]],
     batch_size: int = 1,
     limit: Optional[int] = None,
+    drop_columns: Optional[Sequence[str]] = None,
 ) -> None:
     """Transform CSV column values and write the results to another CSV file.
 
     When several input columns are given, each row's values are joined in the
     given order with a newline, and the joined text is the transform input.
-    The input columns are not written to the output; all other source columns
-    are kept, in their original order, followed by the output column.
+    The input columns and any ``drop_columns`` are not written to the output;
+    all other source columns are kept, in their original order, followed by the
+    output column.
 
     :param input_csv: Source CSV file.
     :param output_csv: Destination CSV file.
@@ -56,13 +78,18 @@ def read_csv(
         value each, in the same order.
     :param batch_size: Number of rows passed to each ``transform`` call.
     :param limit: Maximum number of data rows to read; ``None`` reads all rows.
+    :param drop_columns: Source columns to leave out of the output; ``None``
+        drops none. The generated output column is always written.
     :raises ValueError: If the input has no header, no input column is given,
-        or an input column is missing.
+        or an input or drop column is missing.
     """
     # A bare string is one column name, not a sequence of one-letter names.
     if isinstance(input_columns, str):
         input_columns = [input_columns]
     input_columns = list(input_columns)
+    if isinstance(drop_columns, str):
+        drop_columns = [drop_columns]
+    drop_columns = list(drop_columns or [])
     if not input_columns:
         raise ValueError("At least one input column is required.")
 
@@ -75,18 +102,14 @@ def read_csv(
         raise ValueError("Input CSV has no header.") from None
 
     fieldnames = list(header.columns)
-    missing = [column for column in input_columns if column not in fieldnames]
-    if missing:
-        names = ", ".join(f"'{column}'" for column in missing)
-        noun = "Column" if len(missing) == 1 else "Columns"
-        raise ValueError(
-            f"{noun} {names} not found. "
-            f"Available columns: {', '.join(fieldnames)}"
-        )
+    _require_columns(input_columns, fieldnames, "")
+    _require_columns(drop_columns, fieldnames, "Drop ")
 
-    # The input columns are consumed by the transform, so they are left out of
-    # the output; every other source column is kept in its original order.
-    fieldnames = [column for column in fieldnames if column not in input_columns]
+    # The input columns are consumed by the transform and the drop columns were
+    # excluded by the caller, so both are left out of the output; every other
+    # source column is kept in its original order.
+    excluded = set(input_columns) | set(drop_columns)
+    fieldnames = [column for column in fieldnames if column not in excluded]
     if output_column not in fieldnames:
         fieldnames.append(output_column)
 
