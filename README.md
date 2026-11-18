@@ -222,7 +222,8 @@ applicator run input.csv prompt.json \
 ```
 
 The output CSV contains only the processed rows. Reading stops once the limit
-is reached, so the rest of the file is never loaded. A limit larger than the
+is reached, so the rest of the file is never loaded, including by the
+up-front row count. A limit larger than the
 number of rows processes the whole file. `--limit` works with
 `--batch-size`; the last batch is shortened if needed so that no more than N
 rows are sent.
@@ -398,6 +399,22 @@ keep improving.
 Output is written and flushed after each batch, so an interrupted run loses
 at most one batch of rows.
 
+## Progress and time estimates
+
+Before processing, Applicator counts the input's data rows so the progress bar
+can show a total, a percentage and an estimated time remaining:
+
+```text
+Processing rows:  42%|████▏     | 420/1000 [03:30<04:50, 2.00row/s]
+```
+
+The count reads the file with pandas using the same parser options as
+processing, so quoted values that span several lines count as one row and the
+total always matches the rows processed. Only 1000 rows are held in memory at
+a time while counting, so large files are safe to count. With `--limit N` the
+total is the smaller of N and the file's row count. The count adds one extra
+pass over the file, which is quick compared with the API calls.
+
 ## Performance baselines
 
 These measurements were taken with Ollama on an NVIDIA Tesla P40 (24 GB,
@@ -537,6 +554,8 @@ to produce live results.
 - Sends rows to the API in batches of `--batch-size` rows (default 1); the
   requests in a batch are sent concurrently.
 - Stops after the first `--limit` rows when a limit is given.
+- Counts the rows to process before starting, a chunk at a time, so the
+  progress bar shows a total and an estimated time remaining.
 - Keeps every original CSV column except the input columns and any
   `--drop-column` columns.
 - Adds the generated response to `applicator_output` by default.
@@ -562,6 +581,8 @@ require an API key. The suite covers:
 - JSON prompt validation
 - CSV transformation and validation, including batched processing,
   joining multiple input columns, row limits, and dropping columns
+- Row counting, including multi-line values, limits, and parity with the rows
+  actually processed
 - LLM configuration and response conversion
 - The `--no-think` switch
 - CLI parsing, validation, and dispatch, including both multiple-column forms,
