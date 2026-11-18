@@ -275,7 +275,7 @@ of two columns with `medgemma:4b`:
 ollama pull medgemma:4b
 curl http://localhost:11434/v1/models   # check the server is up and lists the model
 
-./applicator-v0.6.0-linux-x86_64-py311 run input.csv prompt.json \
+./applicator-v0.7.0-linux-x86_64-py311 run input.csv prompt.json \
   --column ReportText ImpressionText \
   --output output.csv \
   --model medgemma:4b \
