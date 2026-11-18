@@ -131,6 +131,7 @@ applicator run input.csv prompt.json \
 | `PROMPT_JSON` | — | yes | — | Readable prompt JSON file |
 | `--column` | `-c` | yes | — | Input CSV column(s) to process; see [Multiple input columns](#multiple-input-columns) |
 | `--output` | `-o` | yes | — | Destination CSV file |
+| `--drop-column` | `-d` | no | none | Source column(s) to leave out of the output CSV; see [Dropping columns](#dropping-columns) |
 | `--model` | `-m` | no | `gpt-4.1-mini` | Model identifier |
 | `--base-url` | — | no | provider default | OpenAI-compatible API base URL |
 | `--api-key` | — | no | provider environment | API key |
@@ -179,6 +180,32 @@ order, followed by the output column.
 `--column COLUMN [COLUMN ...]` takes every following word until the next
 option, so put the input CSV and prompt JSON before it, or follow it with
 another option such as `--output`.
+
+### Dropping columns
+
+Pass one or more column names to `--drop-column` (`-d`) to leave those source
+columns out of the output CSV. Both forms below are equivalent:
+
+```bash
+applicator run input.csv prompt.json \
+  --column ReportText \
+  --drop-column PatientName Notes \
+  --output output.csv
+
+applicator run input.csv prompt.json \
+  -c ReportText -d PatientName -d Notes \
+  --output output.csv
+```
+
+The remaining columns keep their original order, followed by the output
+column, which is always written. Every named column must exist in the input
+CSV header. If any is missing, Applicator raises an error listing all the
+missing names and stops before it creates the output file or calls the model.
+Naming an input column is allowed but has no effect, because input columns are
+never written to the output.
+
+Like `--column`, `--drop-column` takes every following word until the next
+option.
 
 ### Limiting rows
 
@@ -510,14 +537,15 @@ to produce live results.
 - Sends rows to the API in batches of `--batch-size` rows (default 1); the
   requests in a batch are sent concurrently.
 - Stops after the first `--limit` rows when a limit is given.
-- Preserves all original CSV columns.
+- Keeps every original CSV column except the input columns and any
+  `--drop-column` columns.
 - Adds the generated response to `applicator_output` by default.
 - Writes and flushes each completed batch immediately.
 - Prints progress for each processed row.
 - Joins the values of multiple `--column` columns per row, in order, with a
   newline.
-- Raises an error when the input CSV has no header or a requested column is
-  missing.
+- Raises an error when the input CSV has no header or a requested input or
+  drop column is missing.
 - Does not implement agents or MCP.
 
 ## Tests
@@ -533,11 +561,11 @@ require an API key. The suite covers:
 
 - JSON prompt validation
 - CSV transformation and validation, including batched processing,
-  joining multiple input columns, and row limits
+  joining multiple input columns, row limits, and dropping columns
 - LLM configuration and response conversion
 - The `--no-think` switch
-- CLI parsing, validation, and dispatch, including both multiple-column forms
-  and `--limit` validation
+- CLI parsing, validation, and dispatch, including both multiple-column forms,
+  `--drop-column` parsing, and `--limit` validation
 - End-to-end reader behavior using the example fixtures
 
 ## Test fixtures

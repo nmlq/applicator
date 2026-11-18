@@ -77,6 +77,7 @@ def apply_prompt_to_csv(
     batch_size: int = 1,
     no_think: bool = False,
     limit: Optional[int] = None,
+    drop_columns: Optional[Sequence[str]] = None,
 ) -> None:
     """Apply a prompt-driven LLM transformation to one or more CSV columns.
 
@@ -94,6 +95,8 @@ def apply_prompt_to_csv(
         ``reasoning_effort="none"``.
     :param limit: Maximum number of input rows to process; ``None`` processes
         all rows.
+    :param drop_columns: Source columns to leave out of the output CSV; each
+        must exist in the input header.
     """
     # Validate the prompt before creating the client or opening the output file.
     logger.info("Loading prompt from %s", prompt_json)
@@ -110,6 +113,11 @@ def apply_prompt_to_csv(
     )
     if limit is not None:
         logger.info("Limiting input to the first %d row(s)", limit)
+    if drop_columns:
+        logger.info(
+            "Dropping column(s) %s from the output",
+            ", ".join(f"'{column}'" for column in drop_columns),
+        )
     read_csv(
         input_csv=input_csv,
         output_csv=output_csv,
@@ -118,5 +126,6 @@ def apply_prompt_to_csv(
         transform=make_transform(llm, prompt_template),
         batch_size=batch_size,
         limit=limit,
+        drop_columns=drop_columns,
     )
     logger.info("Done. Results written to %s", output_csv)

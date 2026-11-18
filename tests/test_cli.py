@@ -63,6 +63,7 @@ def test_build_parser_parses_run_options(tmp_path):
     assert args.output_column == "result"
     assert args.batch_size == 1
     assert args.limit is None
+    assert args.drop_columns == []
 
 
 def test_build_parser_parses_limit(tmp_path):
@@ -103,6 +104,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         batch_size=4,
         no_think=True,
         limit=10,
+        drop_columns=["site", "notes"],
     )
     cli.run(args)
 
@@ -118,6 +120,7 @@ def test_run_passes_parsed_arguments_to_core(monkeypatch, tmp_path):
         "batch_size": 4,
         "no_think": True,
         "limit": 10,
+        "drop_columns": ["site", "notes"],
     }
 
 
@@ -164,6 +167,36 @@ def test_build_parser_collects_multiple_columns_in_order(tmp_path, column_option
     )
 
     assert args.columns == ["ReportText", "ImpressionText"]
+
+
+@pytest.mark.parametrize(
+    "drop_options",
+    [
+        ["--drop-column", "site", "notes"],
+        ["-d", "site", "-d", "notes"],
+    ],
+)
+def test_build_parser_collects_multiple_drop_columns_in_order(tmp_path, drop_options):
+    """Verify several drop columns are collected in command-line order.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param drop_options: Drop-column options in one of the supported forms.
+    """
+    args = cli.build_parser().parse_args(run_args(tmp_path, *drop_options))
+
+    assert args.drop_columns == ["site", "notes"]
+
+
+def test_main_requires_a_name_after_drop_column(tmp_path, capsys):
+    """Verify ``--drop-column`` needs at least one column name.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param capsys: Pytest output capture fixture.
+    """
+    with pytest.raises(SystemExit):
+        cli.main(run_args(tmp_path, "--drop-column"))
+
+    assert "expected at least one argument" in capsys.readouterr().err
 
 
 def test_main_requires_a_column(tmp_path, capsys):

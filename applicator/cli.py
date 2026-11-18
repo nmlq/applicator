@@ -83,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="output CSV file",
     )
     run_parser.add_argument(
+        "--drop-column",
+        "-d",
+        dest="drop_columns",
+        nargs="+",
+        action="extend",
+        default=[],
+        metavar="COLUMN",
+        help="source CSV column to leave out of the output; give several "
+        "(e.g. -d A B, or -d A -d B). Each must exist in the input CSV",
+    )
+    run_parser.add_argument(
         "--model",
         "-m",
         default="gpt-4.1-mini",
@@ -146,6 +157,7 @@ def run(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         no_think=args.no_think,
         limit=args.limit,
+        drop_columns=args.drop_columns,
     )
 
 

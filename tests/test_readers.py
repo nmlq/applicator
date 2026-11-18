@@ -296,3 +296,114 @@ def test_read_csv_keeps_non_input_columns_in_order(tmp_path):
         rows = list(csv.DictReader(file))
 
     assert rows == [{"id": "1", "site": "north", "result": "A\nB"}]
+
+
+def test_read_csv_drops_requested_columns(tmp_path):
+    """Verify drop columns are left out while other columns keep their order.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text(
+        "id,text,site,notes,score\n1,a,north,n1,5\n2,b,south,n2,7\n",
+        encoding="utf-8",
+    )
+
+    read_csv(
+        input_path,
+        output_path,
+        "text",
+        "result",
+        lambda values: [value.upper() for value in values],
+        drop_columns=["notes", "site"],
+    )
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert rows == [
+        {"id": "1", "score": "5", "result": "A"},
+        {"id": "2", "score": "7", "result": "B"},
+    ]
+
+
+def test_read_csv_accepts_single_drop_column_string(tmp_path):
+    """Verify a bare string is treated as one drop column name.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("id,text,site\n1,a,north\n", encoding="utf-8")
+
+    read_csv(
+        input_path,
+        output_path,
+        "text",
+        "result",
+        lambda values: values,
+        drop_columns="site",
+    )
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert rows == [{"id": "1", "result": "a"}]
+
+
+def test_read_csv_allows_dropping_an_input_column(tmp_path):
+    """Verify naming an input column as a drop column is accepted.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("id,text\n1,a\n", encoding="utf-8")
+
+    read_csv(
+        input_path,
+        output_path,
+        "text",
+        "result",
+        lambda values: values,
+        drop_columns=["text"],
+    )
+
+    with output_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+
+    assert rows == [{"id": "1", "result": "a"}]
+
+
+@pytest.mark.parametrize(
+    "drop_columns, message",
+    [
+        (["missing"], "Drop column 'missing' not found"),
+        (["site", "first", "last"], "Drop columns 'first', 'last' not found"),
+    ],
+)
+def test_read_csv_rejects_unknown_drop_columns(tmp_path, drop_columns, message):
+    """Verify unknown drop columns stop processing before any output is written.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param drop_columns: Drop columns passed to the reader.
+    :param message: Expected error text.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("id,text,site\n1,a,north\n", encoding="utf-8")
+    calls = []
+
+    with pytest.raises(ValueError, match=message):
+        read_csv(
+            input_path,
+            output_path,
+            "text",
+            "result",
+            lambda values: calls.append(values) or values,
+            drop_columns=drop_columns,
+        )
+
+    assert not output_path.exists()
+    assert calls == []
