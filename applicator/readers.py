@@ -9,6 +9,15 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
+# Shared by every pandas read of the input CSV, so the header check, the row
+# count and the processing loop all parse the file the same way.
+# dtype=str and keep_default_na=False keep values exactly as written.
+READ_OPTIONS = dict(encoding="utf-8-sig", dtype=str, keep_default_na=False)
+
+# Rows held in memory at once while counting. One-row chunks cost about 90 µs
+# per row in pandas overhead; 1000-row chunks stay small but count far faster.
+COUNT_CHUNK_SIZE = 1000
+
 
 def read_json(path: Path) -> str:
     """Read and validate a prompt template from a JSON file.
@@ -49,6 +58,45 @@ def _require_columns(columns: Sequence[str], fieldnames: Sequence[str], label: s
             f"{label}{noun} {names} not found. "
             f"Available columns: {', '.join(fieldnames)}"
         )
+
+
+def _iter_chunks(input_csv: Path, chunksize: int, limit: Optional[int]):
+    """Return a reader that yields the input CSV's data rows in chunks.
+
+    Both :func:`count_rows` and :func:`read_csv` read rows through this one
+    function, so the counted rows are exactly the rows that get processed.
+
+    :param input_csv: Source CSV file.
+    :param chunksize: Maximum number of rows per chunk.
+    :param limit: Maximum number of data rows to read; ``None`` reads all rows.
+    :return: Iterator of ``pandas.DataFrame`` chunks.
+    """
+    # chunksize buffers one chunk of rows at a time instead of the whole file.
+    # nrows stops reading after the limit; None reads every row.
+    return pandas.read_csv(input_csv, chunksize=chunksize, nrows=limit, **READ_OPTIONS)
+
+
+def count_rows(
+    input_csv: Path,
+    limit: Optional[int] = None,
+    chunksize: int = COUNT_CHUNK_SIZE,
+) -> int:
+    """Count the data rows in a CSV file without loading it into memory.
+
+    The file is parsed by pandas with the same options as :func:`read_csv`,
+    so quoted values that span several lines count as one row. Only one chunk
+    of rows is held in memory at a time.
+
+    :param input_csv: Source CSV file.
+    :param limit: Stop counting after this many rows; ``None`` counts all.
+    :param chunksize: Maximum number of rows held in memory at once.
+    :return: Number of data rows, not counting the header, capped at ``limit``.
+    :raises ValueError: If the input has no header.
+    """
+    try:
+        return sum(len(chunk) for chunk in _iter_chunks(input_csv, chunksize, limit))
+    except pandas.errors.EmptyDataError:
+        raise ValueError("Input CSV has no header.") from None
 
 
 def read_csv(
@@ -94,10 +142,8 @@ def read_csv(
         raise ValueError("At least one input column is required.")
 
     # Read only the header first so validation happens before any output exists.
-    # dtype=str and keep_default_na=False keep values exactly as written.
-    read_options = dict(encoding="utf-8-sig", dtype=str, keep_default_na=False)
     try:
-        header = pandas.read_csv(input_csv, nrows=0, **read_options)
+        header = pandas.read_csv(input_csv, nrows=0, **READ_OPTIONS)
     except pandas.errors.EmptyDataError:
         raise ValueError("Input CSV has no header.") from None
 
@@ -113,6 +159,11 @@ def read_csv(
     if output_column not in fieldnames:
         fieldnames.append(output_column)
 
+    # Count the rows up front so the progress bar can show a total and an
+    # accurate time estimate. This reads the file once more, a chunk at a time.
+    total = count_rows(input_csv, limit=limit)
+    logger.info("Input has %d data row(s) to process", total)
+
     # Open the destination only after validating the source header.
     with output_csv.open("w", encoding="utf-8", newline="") as dst:
         pandas.DataFrame(columns=fieldnames).to_csv(dst, index=False)
@@ -120,13 +171,9 @@ def read_csv(
         logger.info("Writing results to %s", output_csv)
         # Route log records through tqdm so they don't garble the progress bar.
         with logging_redirect_tqdm():
-            # chunksize buffers one batch of rows at a time instead of the whole file.
-            # nrows stops reading after the limit; None reads every row.
-            # No total without a limit: counting rows would mean reading the file twice.
-            chunks = pandas.read_csv(
-                input_csv, chunksize=batch_size, nrows=limit, **read_options
-            )
-            with tqdm(desc="Processing rows", unit="row", total=limit) as progress:
+            # Each chunk is one batch, read the same way the rows were counted.
+            chunks = _iter_chunks(input_csv, batch_size, limit)
+            with tqdm(desc="Processing rows", unit="row", total=total) as progress:
                 for chunk_df in chunks:
                     # Join the row's input values in column order, one per line.
                     values = chunk_df[input_columns].agg("\n".join, axis=1).tolist()

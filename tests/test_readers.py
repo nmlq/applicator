@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from applicator.readers import read_csv, read_json
+from applicator.readers import count_rows, read_csv, read_json
 
 
 def test_read_json_returns_prompt_template(tmp_path):
@@ -71,6 +71,8 @@ def test_read_csv_transforms_rows_and_drops_input_column(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Processing rows" in captured.err
+    # The pre-counted total lets the bar show progress out of every row.
+    assert "2/2" in captured.err
 
 
 def test_read_csv_rejects_input_without_header(tmp_path):
@@ -407,3 +409,104 @@ def test_read_csv_rejects_unknown_drop_columns(tmp_path, drop_columns, message):
 
     assert not output_path.exists()
     assert calls == []
+
+
+@pytest.mark.parametrize("chunksize", [1, 2, 1000])
+def test_count_rows_counts_data_rows(tmp_path, chunksize):
+    """Verify data rows are counted, with multi-line quoted values as one row.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param chunksize: Rows held in memory per chunk while counting.
+    """
+    input_path = tmp_path / "input.csv"
+    input_path.write_text(
+        'id,text\n1,"Line one\nline two"\n2,plain\n3,"a, b"\n',
+        encoding="utf-8",
+    )
+
+    assert count_rows(input_path, chunksize=chunksize) == 3
+
+
+@pytest.mark.parametrize("limit, expected", [(1, 1), (2, 2), (10, 3), (None, 3)])
+def test_count_rows_caps_at_limit(tmp_path, limit, expected):
+    """Verify ``limit`` caps the count the same way it caps processing.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param limit: Maximum number of rows to count.
+    :param expected: Expected row count.
+    """
+    input_path = tmp_path / "input.csv"
+    input_path.write_text("name\nAda\nGrace\nLinus\n", encoding="utf-8")
+
+    assert count_rows(input_path, limit=limit) == expected
+
+
+def test_count_rows_header_only_is_zero(tmp_path):
+    """Verify a CSV with a header and no data rows counts as zero.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    input_path.write_text("name,age\n", encoding="utf-8")
+
+    assert count_rows(input_path) == 0
+
+
+def test_count_rows_rejects_input_without_header(tmp_path):
+    """Verify an empty file is rejected like it is by ``read_csv``.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    """
+    input_path = tmp_path / "input.csv"
+    input_path.write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Input CSV has no header"):
+        count_rows(input_path)
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 5])
+def test_count_rows_matches_rows_processed(tmp_path, batch_size):
+    """Verify the count equals the rows ``read_csv`` actually processes.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param batch_size: Rows passed to each transform call.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text(
+        "\ufeffid,text\n"
+        '1,"multi\nline"\n'
+        "2,\n"
+        '3,"quoted ""value"""\n'
+        "4,NA\n"
+        "5,last\n",
+        encoding="utf-8",
+    )
+    processed = []
+
+    def transform(values):
+        """Record and echo each batch."""
+        processed.extend(values)
+        return values
+
+    read_csv(input_path, output_path, "text", "result", transform, batch_size=batch_size)
+
+    assert count_rows(input_path) == len(processed) == 5
+
+
+@pytest.mark.parametrize("limit, expected", [(None, "4/4"), (3, "3/3"), (10, "4/4")])
+def test_read_csv_progress_total_uses_row_count(tmp_path, capsys, limit, expected):
+    """Verify the progress bar total is the row count, capped by ``limit``.
+
+    :param tmp_path: Pytest-provided temporary directory.
+    :param capsys: Pytest output-capture fixture.
+    :param limit: Maximum number of rows to read.
+    :param expected: Final progress text expected on stderr.
+    """
+    input_path = tmp_path / "input.csv"
+    output_path = tmp_path / "output.csv"
+    input_path.write_text("name\nAda\nGrace\nLinus\nBarbara\n", encoding="utf-8")
+
+    read_csv(input_path, output_path, "name", "result", lambda v: v, limit=limit)
+
+    assert expected in capsys.readouterr().err
