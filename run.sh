@@ -89,15 +89,17 @@ validate_runs() {
 # Run applicator once per entry in RUNS.
 run_applicator() {
   local run input_csv prompt_json output_csv
+  local index=0 total=${#RUNS[@]}
 
   for run in "${RUNS[@]}"; do
+    index=$((index + 1))
     # Split the entry on "|" into its three fields.
     IFS='|' read -r input_csv prompt_json output_csv <<< "$run"
 
     # Make sure the output directory exists before writing to it.
     mkdir -p "$(dirname "$output_csv")"
 
-    echo "Running $prompt_json on $input_csv ($COLUMN) -> $output_csv"
+    echo "[$index/$total] Running $prompt_json on $input_csv ($COLUMN) -> $output_csv"
     "$APPLICATOR" run "$input_csv" "$prompt_json" \
       --column "${COLUMN_ARGS[@]}" \
       --output "$output_csv" \
